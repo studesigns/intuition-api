@@ -313,13 +313,14 @@ def extract_json_from_response(response_text: str) -> Dict[str, any]:
     1. First tries to parse response_text directly as JSON (raw JSON response)
     2. Falls back to markdown json extraction if needed
     3. Returns validated JSON with required fields
+    4. Applies hallucination detection to detailed_analysis
 
     Returns:
         {
             "risk_level": "CRITICAL" | "HIGH" | "MODERATE" | "LOW",
             "action": "BLOCK" | "ESCALATE" | "FLAG" | "APPROVE",
             "violation_summary": "...",
-            "detailed_analysis": "..."
+            "detailed_analysis": "..." (cleaned of hallucinations)
         }
     """
     import json
@@ -327,6 +328,8 @@ def extract_json_from_response(response_text: str) -> Dict[str, any]:
     # Try 1: Parse response as raw JSON directly
     try:
         parsed_json = json.loads(response_text.strip())
+        # Clean hallucinations from detailed_analysis
+        parsed_json = _remove_hallucinations_from_json(parsed_json)
         return parsed_json
     except json.JSONDecodeError:
         pass
@@ -337,12 +340,58 @@ def extract_json_from_response(response_text: str) -> Dict[str, any]:
         if json_match:
             json_str = json_match.group(1)
             parsed_json = json.loads(json_str)
+            # Clean hallucinations from detailed_analysis
+            parsed_json = _remove_hallucinations_from_json(parsed_json)
             return parsed_json
     except (json.JSONDecodeError, AttributeError):
         pass
 
     # Fallback: return empty dict with defaults so frontend can show error gracefully
     return {}
+
+
+def _remove_hallucinations_from_json(json_obj: Dict[str, any]) -> Dict[str, any]:
+    """
+    Post-process JSON to detect and remove hallucinated content in detailed_analysis.
+
+    Hallucination patterns:
+    - "including X" where X is NOT explicitly mentioned in document scope
+    - Geographic inference (e.g., "Germany" when document only says "APAC")
+    - Adding countries/regions not in the original document
+    """
+    if "detailed_analysis" not in json_obj:
+        return json_obj
+
+    analysis = json_obj["detailed_analysis"]
+
+    # CRITICAL: Remove the pattern "including [location]" as this is typically hallucination
+    # Pattern: "region X, including Y" where Y is inferred, not explicit
+    analysis = re.sub(
+        r',\s*including\s+[A-Z][a-zA-Z\s,]*(?=[\.;,\s]|$)',
+        '',
+        analysis,
+        flags=re.IGNORECASE
+    )
+
+    # Remove phrases that indicate inference/hallucination
+    hallucination_phrases = [
+        r'\bin particular,?\s+',  # "in particular, X" - inference marker
+        r',?\s+such as\s+',  # "such as X" - examples added beyond document
+        r',?\s+for example\s+',  # "for example X"
+        r'including\s+(?!the)',  # "including" followed by noun (but not "including the")
+        r'notably\s+',  # "notably X" - emphasizing inferred points
+        r'notably[,\s]',
+    ]
+
+    for pattern in hallucination_phrases:
+        analysis = re.sub(pattern, ' ', analysis, flags=re.IGNORECASE)
+
+    # Clean up multiple spaces
+    analysis = re.sub(r'\s+', ' ', analysis)
+    analysis = analysis.strip()
+
+    json_obj["detailed_analysis"] = analysis
+    return json_obj
 
 
 def _retrieve_documents_sync(
@@ -414,6 +463,12 @@ def synthesize_comparative_answer(
     EXTRACTION MODE ONLY - no synthesis, reasoning, or inference.
     """
 
+    # Extract user locations from sub_queries
+    user_locations = set()
+    for sub_query in sub_queries:
+        if "entities" in sub_query:
+            user_locations.add(sub_query["entities"])
+
     # Build context for each region separately
     region_contexts = {}
     for entity, docs in retrieval_results.items():
@@ -425,9 +480,18 @@ def synthesize_comparative_answer(
         return "No relevant policies found in the knowledge base."
 
     # Create an extraction prompt (not synthesis)
+    # IMPORTANT: Include user location explicitly to prevent hallucination
+    user_location_str = " and ".join(sorted(user_locations)) if user_locations else "unknown"
+
     extraction_prompt = f"""{RISK_OFFICER_PROMPT}
 
+USER LOCATION: {user_location_str}
 ORIGINAL QUESTION: {question}
+
+CRITICAL REMINDER:
+You are analyzing policies for [{user_location_str}] ONLY.
+Do NOT apply policies from other regions.
+Do NOT say "including {user_location_str}" unless {user_location_str} is EXPLICITLY listed in the document scope.
 
 RETRIEVED POLICY DOCUMENTS:
 """
@@ -439,11 +503,19 @@ RETRIEVED POLICY DOCUMENTS:
 EXTRACTION TASK:
 You are in EXTRACTION MODE. Do NOT synthesize or provide recommendations.
 
-Your task:
+Your task for [{user_location_str}]:
 1. Find the explicit scope statement in each document
-2. Check if the user's location is explicitly mentioned in that scope
-3. If YES: Extract what policies apply to that location
-4. If NO: State that document does not apply
+2. Check if [{user_location_str}] is EXPLICITLY mentioned in that scope
+   - Explicit = directly named or listed in parentheses
+   - NOT explicit = regional classification like "APAC" without listing {user_location_str}
+3. If YES: Extract what policies apply to [{user_location_str}]
+4. If NO: State that document does not apply to [{user_location_str}]
+
+CRITICAL CONSTRAINTS FOR [{user_location_str}]:
+- Do NOT say "including {user_location_str}" unless it's in the document
+- Do NOT infer that [{user_location_str}] is in a region unless explicit
+- Do NOT use contextual knowledge about geography
+- If document says "APAC region" but doesn't list {user_location_str}, then this document does NOT apply
 
 Do NOT combine information from multiple documents.
 Do NOT infer document scope beyond what is explicitly stated.
