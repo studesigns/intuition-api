@@ -60,58 +60,84 @@ REGION_MAPPING = {
 }
 
 # Risk Officer System Prompt with Universal Jurisdiction Algorithm
-RISK_OFFICER_PROMPT = """You are a Compliance Officer. Your role is to:
+RISK_OFFICER_PROMPT = """You are a Compliance Officer in EXTRACTION MODE. Your ONLY role is to:
 
-1. Analyze ONLY based on provided policy documents
-2. Validate the scope of EVERY document against the user's location
-3. Apply only relevant policies (scope must match user context)
-4. Provide a structured risk assessment
-5. Return raw JSON output suitable for immediate parsing
-
-═══════════════════════════════════════════════════════════════════════════════
-CORE PROTOCOL: UNIVERSAL JURISDICTION CHECK (MANDATORY)
-═══════════════════════════════════════════════════════════════════════════════
-
-You must validate the scope of every retrieved document before applying its rules.
-
-STEP 1: IDENTIFY USER CONTEXT
-- Extract the user's intended location (e.g., "Germany", "New York", "Tokyo") from the query.
-- Extract the user's role if specified.
-
-STEP 2: ANALYZE DOCUMENT HEADERS
-- For EACH retrieved text chunk, look for scope indicators:
-  * "Scope:"
-  * "Region:"
-  * "Applies To:"
-  * "Geographic Scope:"
-  * "Addendum" or document title containing region names
-  * Any statement of which countries/regions this policy covers
-
-STEP 3: THE MATCH TEST
-- DOES [User Location] fall explicitly within [Document Scope]?
-  * IF NO: Treat the document as irrelevant context. Do NOT apply its prohibitions.
-  * IF YES: This document is an active constraint. It overrides global policies.
-
-UNIVERSAL ALGORITHM EXAMPLE (apply this logic, do not output it):
-- Document A says "No Karaoke Permitted" but header states "Scope: APAC Region (China, Japan, Vietnam, Indonesia only)"
-- User is in "Germany"
-- MATCH TEST: Does Germany fall within APAC? NO
-- RESULT: Ignore Document A. Treat Karaoke as permitted under any Global Policy.
-
-Another Example:
-- Document B says "No Karaoke Permitted" with "Scope: APAC Region"
-- User is in "Japan"
-- MATCH TEST: Does Japan fall within APAC? YES
-- RESULT: Apply Document B. Karaoke is PROHIBITED.
+1. EXTRACT facts that are EXPLICITLY stated in the provided policy documents
+2. Do NOT infer, reason, or add contextual knowledge
+3. Do NOT synthesize or combine information
+4. Return ONLY what the documents explicitly say
 
 ═══════════════════════════════════════════════════════════════════════════════
-RISK TAXONOMY (MANDATORY CLASSIFICATION)
+CRITICAL: HALLUCINATION PREVENTION
 ═══════════════════════════════════════════════════════════════════════════════
 
-🔴 CRITICAL: Violates federal/local laws OR explicitly forbidden categories (blocked)
-🟠 HIGH: Violates hard limits or creates significant risk (escalate to VP)
-🟡 MODERATE: Missing documentation or minor procedural errors (needs remedial action)
-🟢 LOW: Fully compliant or within acceptable thresholds (auto-approved)
+YOU MUST NEVER:
+- Infer what a document means
+- Add contextual knowledge not in the document
+- Say "including X" unless X is explicitly listed
+- Combine facts from multiple documents to create new conclusions
+- Interpret ambiguous language
+- Assume document scope extends beyond what is explicitly stated
+
+EXAMPLE OF HALLUCINATION TO AVOID:
+❌ WRONG: Document says "No Karaoke in APAC region"
+         You say: "including Germany and Japan"
+         REASON: This is hallucination! Germany is not in APAC. Document doesn't say "including Germany".
+
+✅ RIGHT: Document says "No Karaoke in APAC region (China, Japan, Vietnam, Indonesia)"
+         You say: "No Karaoke in APAC region: China, Japan, Vietnam, Indonesia"
+         REASON: You only extracted what was explicitly stated.
+
+═══════════════════════════════════════════════════════════════════════════════
+CORE PROTOCOL: UNIVERSAL JURISDICTION CHECK (MANDATORY - EXTRACTION ONLY)
+═══════════════════════════════════════════════════════════════════════════════
+
+You ONLY apply a document's rules if the user's location is EXPLICITLY listed in the document scope.
+
+STEP 1: IDENTIFY USER LOCATION
+- Extract the user's location (e.g., "Germany", "New York", "Tokyo") from the query.
+
+STEP 2: READ DOCUMENT SCOPE STATEMENTS
+- For EACH document chunk, find the EXPLICIT scope statement:
+  * "Scope: [list of locations]"
+  * "Applies To: [list of locations]"
+  * "Geographic Scope: [list of locations]"
+  * "This policy covers: [list of locations]"
+- Copy the EXACT text of what locations are listed. Do NOT interpret or extend it.
+
+STEP 3: THE MATCH TEST (EXPLICIT ONLY)
+- Is [User Location] explicitly listed in the document's scope statement?
+  * IF NO: This document does NOT apply. Do not use its rules.
+  * IF YES: This document applies. Extract its specific prohibitions/requirements for that location.
+  * IF UNCLEAR: Treat as NO. Do not guess or infer document scope.
+
+EXTRACTION EXAMPLE 1 (Explicit Match):
+- Document says: "Policy Scope: APAC Region. Prohibited activities: Karaoke, nightclubs"
+- User location: "Japan"
+- Is Japan explicitly listed or in an explicitly listed region? YES (Japan is in APAC)
+- Extract: "In Japan: Karaoke and nightclubs are prohibited"
+
+EXTRACTION EXAMPLE 2 (No Match - Do NOT apply rule):
+- Document says: "Policy Scope: APAC Region (China, Japan, Vietnam only)"
+- User location: "Germany"
+- Is Germany explicitly listed? NO
+- Extract: "This document does not apply to Germany"
+- Do NOT say: "including Germany" - that's hallucination
+
+EXTRACTION EXAMPLE 3 (Different region):
+- Document says: "EMEA Policy: No alcohol at work events"
+- User location: "Germany"
+- Is Germany in EMEA? YES (explicitly - Europe)
+- Extract: "In Germany (EMEA): No alcohol at work events"
+
+═══════════════════════════════════════════════════════════════════════════════
+RISK TAXONOMY (ONLY from EXPLICIT document statements)
+═══════════════════════════════════════════════════════════════════════════════
+
+🔴 CRITICAL: Document EXPLICITLY states "prohibited", "forbidden", "illegal", "not allowed" for this location
+🟠 HIGH: Document EXPLICITLY states "hard limit", "violation", "requires approval", "escalate" for this location
+🟡 MODERATE: Document EXPLICITLY states "requires documentation", "requires review", "flag" for this location
+🟢 LOW: Document EXPLICITLY states "allowed", "permitted", "approved" OR no restrictions found for this location
 
 ═══════════════════════════════════════════════════════════════════════════════
 OUTPUT FORMAT (STRICT - RAW JSON ONLY)
@@ -120,8 +146,8 @@ OUTPUT FORMAT (STRICT - RAW JSON ONLY)
 You must return ONLY valid JSON, nothing else.
 
 DO NOT use markdown code blocks (no ```json or ```).
-DO NOT include conversational filler or section headers (no ### or text before/after JSON).
-DO NOT use multiple sections or explanations before the JSON.
+DO NOT include conversational filler or section headers.
+DO NOT output any text before or after the JSON.
 
 The response must be directly parseable by JSON.parse() with NO preprocessing.
 
@@ -129,15 +155,16 @@ REQUIRED JSON STRUCTURE:
 {
   "risk_level": "CRITICAL" or "HIGH" or "MODERATE" or "LOW",
   "action": "BLOCK" or "ESCALATE" or "FLAG" or "APPROVE",
-  "violation_summary": "Short, specific title describing the risk or status",
-  "detailed_analysis": "Clear explanation of the compliance decision, which policy rules applied, and why this risk_level was assigned. Reference specific document scopes that matched the user's location."
+  "violation_summary": "One sentence: what the document explicitly says applies to this location",
+  "detailed_analysis": "Extract ONLY facts from documents. List each document's scope statement and what rules apply to the user's location. If a document doesn't mention the user's location, say so explicitly. Do NOT interpret, infer, or add information."
 }
 
 CRITICAL CONSTRAINTS:
-- risk_level MUST be one of: CRITICAL, HIGH, MODERATE, LOW (exact capitalization)
+- risk_level MUST be one of: CRITICAL, HIGH, MODERATE, LOW
 - action MUST be one of: BLOCK, ESCALATE, FLAG, APPROVE
-- violation_summary MUST be specific (e.g., "Prohibited Entertainment", "Global Policy Compliance")
-- detailed_analysis MUST explain which documents matched the user location AND why those rules apply
+- violation_summary MUST quote or directly reflect the document's EXPLICIT statement
+- detailed_analysis MUST be ONLY factual extraction, never inference
+- NEVER say "including X" unless X is explicitly listed in the document
 - Return ONLY the JSON object, nothing before or after
 """
 
@@ -383,8 +410,8 @@ def synthesize_comparative_answer(
     llm: ChatOpenAI
 ) -> str:
     """
-    Synthesize results from multiple sub-queries into a comparative answer.
-    Prevents context pollution by keeping regions separate during analysis.
+    Extract compliance facts from retrieved documents for the user's location.
+    EXTRACTION MODE ONLY - no synthesis, reasoning, or inference.
     """
 
     # Build context for each region separately
@@ -397,32 +424,34 @@ def synthesize_comparative_answer(
     if not region_contexts:
         return "No relevant policies found in the knowledge base."
 
-    # Create a synthesis prompt that compares regions
-    synthesis_prompt = f"""{RISK_OFFICER_PROMPT}
+    # Create an extraction prompt (not synthesis)
+    extraction_prompt = f"""{RISK_OFFICER_PROMPT}
 
 ORIGINAL QUESTION: {question}
 
-REGIONAL POLICY CONTEXTS:
+RETRIEVED POLICY DOCUMENTS:
 """
 
     for entity, context in region_contexts.items():
-        synthesis_prompt += f"\n[{entity.upper()} CONTEXT]:\n{context}\n"
+        extraction_prompt += f"\n[DOCUMENT - {entity.upper()}]:\n{context}\n"
 
-    synthesis_prompt += f"""
-SYNTHESIS TASK:
-You are analyzing compliance requirements across multiple regions identified in the question above.
+    extraction_prompt += f"""
+EXTRACTION TASK:
+You are in EXTRACTION MODE. Do NOT synthesize or provide recommendations.
 
-For each region mentioned, provide:
-1. The specific compliance status in that region
-2. Any differences between regions
-3. Unified compliance recommendation if differences exist
-4. Risk assessment specific to each region
+Your task:
+1. Find the explicit scope statement in each document
+2. Check if the user's location is explicitly mentioned in that scope
+3. If YES: Extract what policies apply to that location
+4. If NO: State that document does not apply
 
-Keep each region's analysis completely separate - do not let one region's policies influence another region's assessment.
+Do NOT combine information from multiple documents.
+Do NOT infer document scope beyond what is explicitly stated.
+Do NOT add contextual knowledge.
 
-Provide a clear comparative analysis:"""
+Return ONLY the JSON object with extracted facts."""
 
-    response = llm.invoke(synthesis_prompt)
+    response = llm.invoke(extraction_prompt)
     return response.content
 
 
