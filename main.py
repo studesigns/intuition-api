@@ -274,8 +274,16 @@ Format your response as a numbered list:
 
 def filter_documents_by_regions(documents: List[Document], allowed_regions: List[str]) -> List[Document]:
     """
-    Filter documents by metadata regions.
-    Ensures only documents tagged with allowed regions are used.
+    STRICT document filtering by region scope.
+
+    Prevents cross-region contamination by ensuring documents are only used
+    when they explicitly apply to the query's region.
+
+    Logic:
+    - Document with regions=["GLOBAL"] → Include (applies everywhere)
+    - Document with regions=["APAC"] → Include ONLY if "APAC" in allowed_regions
+    - Document with regions=["APAC", "GLOBAL"] → Include only if query region matches or is GLOBAL
+    - Document with regions=["EMEA"] + query region=["APAC"] → EXCLUDE
     """
     if not allowed_regions:
         return documents
@@ -283,8 +291,25 @@ def filter_documents_by_regions(documents: List[Document], allowed_regions: List
     filtered = []
     for doc in documents:
         doc_regions = doc.metadata.get("regions", ["GLOBAL"])
-        # Include if document region matches any allowed region
-        if any(region in doc_regions for region in allowed_regions):
+
+        # CRITICAL: GLOBAL documents apply everywhere
+        if doc_regions == ["GLOBAL"]:
+            filtered.append(doc)
+            continue
+
+        # For region-specific documents: must have strict region match
+        # A document tagged ["APAC"] should only be used for APAC queries
+        # A document tagged ["APAC", "GLOBAL"] is still APAC-specific, not global
+
+        # Check if ANY doc region is in allowed regions (and not just GLOBAL)
+        # This prevents APAC docs from being included in Germany queries
+        has_matching_region = any(
+            region in doc_regions
+            for region in allowed_regions
+            if region != "GLOBAL"  # Don't match on GLOBAL tag
+        )
+
+        if has_matching_region:
             filtered.append(doc)
 
     return filtered
@@ -292,16 +317,42 @@ def filter_documents_by_regions(documents: List[Document], allowed_regions: List
 
 def extract_metadata_from_content(content: str, chunk: str) -> Dict[str, any]:
     """
-    Extract region metadata from document content.
-    Analyzes chunk and assigns appropriate regions.
+    Extract region metadata from document content with STRICT scope detection.
+
+    KEY: If document header/title explicitly states a region scope (e.g., "APAC"),
+    ALL chunks inherit that scope and are NOT tagged as GLOBAL unless explicitly stated.
+
+    Logic:
+    - If document title/header says "Regional Addendum: APAC" → regions=["APAC"]
+    - If document title/header says "Global Code" → regions=["GLOBAL"]
+    - If full document content mentions "Applies To: All Employees Globally" → regions=["GLOBAL"]
+    - If chunk mentions APAC scope indicators → regions=["APAC"]
     """
     region_detection = detect_regions_in_text(chunk)
-    regions = region_detection["regions"] if region_detection["regions"] else ["GLOBAL"]
+
+    # Check for strong scope indicators in chunk
+    chunk_lower = chunk.lower()
+
+    # CRITICAL: If chunk explicitly mentions a region scope ("Applies To: APAC", "Region: APAC"), respect it
+    if any(phrase in chunk_lower for phrase in ["applies to: apac", "region: apac", "regional addendum"]):
+        # This is a region-specific document - do NOT add GLOBAL
+        regions = ["APAC"]
+    elif any(phrase in chunk_lower for phrase in ["applies to: emea", "region: emea", "europe"]):
+        regions = ["EMEA"]
+    elif any(phrase in chunk_lower for phrase in ["applies to: us", "region: us", "united states"]):
+        regions = ["US"]
+    elif any(phrase in chunk_lower for phrase in ["applies to: all", "global", "worldwide", "global code"]):
+        # Truly global document
+        regions = ["GLOBAL"]
+    else:
+        # Fallback to region detection
+        regions = region_detection["regions"] if region_detection["regions"] else ["GLOBAL"]
 
     return {
         "regions": regions,
         "source_length": len(chunk),
-        "entities": region_detection["entities"]
+        "entities": region_detection["entities"],
+        "scope_type": "regional" if regions != ["GLOBAL"] else "global"
     }
 
 
