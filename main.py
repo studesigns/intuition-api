@@ -352,45 +352,72 @@ def extract_json_from_response(response_text: str) -> Dict[str, any]:
 
 def _remove_hallucinations_from_json(json_obj: Dict[str, any]) -> Dict[str, any]:
     """
-    Post-process JSON to detect and remove hallucinated content in detailed_analysis.
+    Post-process JSON to remove hallucinated content from all text fields.
 
-    Hallucination patterns:
+    Hallucination patterns to remove:
     - "including X" where X is NOT explicitly mentioned in document scope
+    - "which includes X" (variant of above)
     - Geographic inference (e.g., "Germany" when document only says "APAC")
-    - Adding countries/regions not in the original document
+    - Inference phrases: "in particular", "such as", "notably", "for example"
     """
-    if "detailed_analysis" not in json_obj:
-        return json_obj
 
-    analysis = json_obj["detailed_analysis"]
+    # Fields to clean: both violation_summary and detailed_analysis
+    fields_to_clean = ["violation_summary", "detailed_analysis"]
 
-    # CRITICAL: Remove the pattern "including [location]" as this is typically hallucination
-    # Pattern: "region X, including Y" where Y is inferred, not explicit
-    analysis = re.sub(
-        r',\s*including\s+[A-Z][a-zA-Z\s,]*(?=[\.;,\s]|$)',
-        '',
-        analysis,
-        flags=re.IGNORECASE
-    )
+    for field in fields_to_clean:
+        if field not in json_obj:
+            continue
 
-    # Remove phrases that indicate inference/hallucination
-    hallucination_phrases = [
-        r'\bin particular,?\s+',  # "in particular, X" - inference marker
-        r',?\s+such as\s+',  # "such as X" - examples added beyond document
-        r',?\s+for example\s+',  # "for example X"
-        r'including\s+(?!the)',  # "including" followed by noun (but not "including the")
-        r'notably\s+',  # "notably X" - emphasizing inferred points
-        r'notably[,\s]',
-    ]
+        text = json_obj[field]
 
-    for pattern in hallucination_phrases:
-        analysis = re.sub(pattern, ' ', analysis, flags=re.IGNORECASE)
+        # CRITICAL HALLUCINATION REMOVAL PATTERNS
+        # Pattern 1: Remove ", including [Location]" constructs
+        # Examples: ", including Germany" or ", including Japan"
+        text = re.sub(
+            r',\s*including\s+[A-Z][a-zA-Z\s,&]*(?=[\.;,\s]|$)',
+            '',
+            text,
+            flags=re.IGNORECASE
+        )
 
-    # Clean up multiple spaces
-    analysis = re.sub(r'\s+', ' ', analysis)
-    analysis = analysis.strip()
+        # Pattern 2: Remove "which includes [Location]" constructs
+        # Examples: "which includes Germany" or "which includes Japan"
+        text = re.sub(
+            r',?\s+which\s+includes?\s+[A-Z][a-zA-Z\s,&]*(?=[\.;,\s]|$)',
+            '',
+            text,
+            flags=re.IGNORECASE
+        )
 
-    json_obj["detailed_analysis"] = analysis
+        # Pattern 3: Remove standalone "including" followed by location/region name
+        text = re.sub(
+            r'\s+including\s+[A-Z][a-zA-Z\s,&]*(?=[\.;,\s]|$)',
+            '',
+            text,
+            flags=re.IGNORECASE
+        )
+
+        # Pattern 4: Remove inference phrases that indicate hallucination
+        inference_patterns = [
+            r',?\s+in\s+particular[,\s]',  # "in particular" - inference marker
+            r',?\s+such\s+as\s+',  # "such as X" - examples added beyond document
+            r',?\s+for\s+example[,\s]',  # "for example X"
+            r',?\s+notably[,\s]',  # "notably X" - emphasizing inferred points
+            r'\s+and\s+also\s+',  # "and also" - adds extra info
+        ]
+
+        for pattern in inference_patterns:
+            text = re.sub(pattern, ' ', text, flags=re.IGNORECASE)
+
+        # Clean up multiple spaces and trim
+        text = re.sub(r'\s+', ' ', text)
+        text = text.strip()
+
+        # Remove dangling commas at end
+        text = re.sub(r',\s*$', '', text)
+
+        json_obj[field] = text
+
     return json_obj
 
 
@@ -466,8 +493,8 @@ def synthesize_comparative_answer(
     # Extract user locations from sub_queries
     user_locations = set()
     for sub_query in sub_queries:
-        if "entities" in sub_query:
-            user_locations.add(sub_query["entities"])
+        if "entity" in sub_query:
+            user_locations.add(sub_query["entity"])
 
     # Build context for each region separately
     region_contexts = {}
