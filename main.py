@@ -530,23 +530,44 @@ RETRIEVED POLICY DOCUMENTS:
 EXTRACTION TASK:
 You are in EXTRACTION MODE. Do NOT synthesize or provide recommendations.
 
-Your task for [{user_location_str}]:
-1. Find the explicit scope statement in each document
-2. Check if [{user_location_str}] is EXPLICITLY mentioned in that scope
-   - Explicit = directly named or listed in parentheses
-   - NOT explicit = regional classification like "APAC" without listing {user_location_str}
-3. If YES: Extract what policies apply to [{user_location_str}]
-4. If NO: State that document does not apply to [{user_location_str}]
+IMPORTANT: This query involves multiple locations: {user_location_str}
+For EACH location, provide a SEPARATE assessment in the detailed_analysis.
 
-CRITICAL CONSTRAINTS FOR [{user_location_str}]:
-- Do NOT say "including {user_location_str}" unless it's in the document
-- Do NOT infer that [{user_location_str}] is in a region unless explicit
+Your task:
+1. For EACH location in [{user_location_str}]:
+   a. Find the explicit scope statement in each document
+   b. Check if [LOCATION] is EXPLICITLY mentioned in that scope
+      - Explicit = directly named or listed in parentheses
+      - NOT explicit = regional classification like "APAC" without listing [LOCATION]
+   c. If YES: Extract what policies apply to [LOCATION]
+   d. If NO: State that document does not apply to [LOCATION]
+
+2. Build separate policy assessment for each location in detailed_analysis
+
+CRITICAL CONSTRAINTS:
+- Provide analysis for ALL locations mentioned: {user_location_str}
+- Do NOT say "including [LOCATION]" unless it's in the document
+- Do NOT infer that [LOCATION] is in a region unless explicit
 - Do NOT use contextual knowledge about geography
-- If document says "APAC region" but doesn't list {user_location_str}, then this document does NOT apply
+- For each location: clearly state whether policies APPLY or DO NOT APPLY
+- If document says "APAC region" but doesn't list a location, then that document does NOT apply to that location
 
 Do NOT combine information from multiple documents.
 Do NOT infer document scope beyond what is explicitly stated.
 Do NOT add contextual knowledge.
+
+OUTPUT FORMAT FOR MULTIPLE LOCATIONS:
+If analyzing multiple locations, structure detailed_analysis as:
+
+[LOCATION 1]:
+- Policy 1 applies/does not apply because...
+- Policy 2 applies/does not apply because...
+- Overall risk: [reason]
+
+[LOCATION 2]:
+- Policy 1 applies/does not apply because...
+- Policy 2 applies/does not apply because...
+- Overall risk: [reason]
 
 Return ONLY the JSON object with extracted facts."""
 
