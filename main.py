@@ -150,9 +150,16 @@ SECTION 1: RISK CLASSIFICATION (JSON - for frontend rendering)
 {
   "risk_level": "CRITICAL|HIGH|MODERATE|LOW",
   "color": "RED|ORANGE|YELLOW|GREEN",
-  "action": "BLOCK|ESCALATE_VP|REQUIRE_DOCS|APPROVE"
+  "action": "BLOCK|ESCALATE_VP|REQUIRE_DOCS|APPROVE",
+  "violation_summary": "One sentence summary of the specific violation or compliance status"
 }
 ```
+
+The violation_summary MUST be:
+- A specific, meaningful title (NOT generic like "The employee")
+- Examples: "Prohibited Entertainment", "Gift Limit Exceeded", "Global Policy Compliance", "Missing Expense Receipt"
+- Describes WHAT was violated or what the status is
+- Used as the Card Title in the frontend
 
 SECTION 2: COMPLIANCE ANALYSIS (Text - for user explanation)
 Format as follows:
@@ -350,6 +357,35 @@ def extract_metadata_from_content(content: str, chunk: str) -> Dict[str, any]:
         "source_length": len(chunk),
         "entities": region_detection["entities"]
     }
+
+
+def extract_json_from_response(response_text: str) -> Dict[str, any]:
+    """
+    Extract JSON object from LLM response.
+    Looks for JSON between ``` markers and extracts violation_summary.
+
+    Returns:
+        {
+            "risk_level": "CRITICAL|HIGH|MODERATE|LOW",
+            "color": "RED|ORANGE|YELLOW|GREEN",
+            "action": "...",
+            "violation_summary": "..."
+        }
+    """
+    import json
+
+    try:
+        # Look for JSON block in ``` ```
+        json_match = re.search(r'```json\s*\n?\s*({.*?})\s*\n?```', response_text, re.DOTALL)
+        if json_match:
+            json_str = json_match.group(1)
+            parsed_json = json.loads(json_str)
+            return parsed_json
+    except (json.JSONDecodeError, AttributeError):
+        pass
+
+    # Fallback: return empty dict so we can use defaults
+    return {}
 
 
 def _retrieve_documents_sync(
@@ -672,6 +708,15 @@ async def query_policies(request: dict):
 
         sources = [doc.page_content[:200] + "..." for doc in all_docs[:5]]  # Top 5
 
+        # ===== Extract JSON Classification from Response =====
+        # The LLM includes a JSON block with violation_summary and other fields
+        json_classification = extract_json_from_response(answer)
+
+        violation_summary = json_classification.get(
+            "violation_summary",
+            "Compliance assessment pending..."
+        )
+
         # Determine compliance status from answer
         compliance_status = "COMPLIANT"
         if "RISK DETECTED" in answer.upper():
@@ -686,7 +731,10 @@ async def query_policies(request: dict):
             "documents_searched": len(all_docs),
             "query_decomposition": sub_queries,
             "regions_analyzed": list(regions_analyzed),
-            "decomposition_note": f"Query decomposed into {len(sub_queries)} sub-queries with isolated metadata routing"
+            "decomposition_note": f"Query decomposed into {len(sub_queries)} sub-queries with isolated metadata routing",
+            # ===== New: Structured JSON fields for frontend =====
+            "violation_summary": violation_summary,
+            "risk_classification": json_classification
         }
 
     except Exception as e:
