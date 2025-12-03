@@ -715,14 +715,18 @@ For Germany specifically:
 - Therefore: Karaoke entertainment = PERMITTED (LOW risk)
 
 ===== JAPAN/APAC SPECIFIC - WHAT IS & ISN'T PROHIBITED =====
-CRITICAL SCOPE RULE: Tokyo and Japan ARE IN THE APAC REGION.
-The APAC Regional Addendum EXPLICITLY applies to Japan and Tokyo.
-Apply the APAC Addendum rules to Tokyo and Japan queries.
+CRITICAL SCOPE RULE: {entity.upper()} is in the APAC region if it's one of: Japan, Tokyo, China, Vietnam, Indonesia
+The APAC Regional Addendum Section 3.1.1 EXPLICITLY applies to these locations.
 
-**EXPLICITLY PROHIBITED in APAC/Japan** (from APAC Addendum Section 3.1.1):
-- Karaoke (KTV) - STRICTLY PROHIBITED in APAC including Japan
-- Nightclubs - STRICTLY PROHIBITED in APAC including Japan
-- Hostess bars - STRICTLY PROHIBITED in APAC including Japan
+**FOR JAPAN and TOKYO SPECIFICALLY**:
+From APAC Addendum Section 3.1.1:
+"Karaoke (KTV), nightclubs, or hostess bars, are STRICTLY PROHIBITED in the APAC region."
+This applies to Japan and Tokyo.
+
+**EXPLICITLY PROHIBITED in {entity.upper()}** (if APAC location - Japan/Tokyo/China/Vietnam/Indonesia):
+- Karaoke (KTV) - STRICTLY PROHIBITED
+- Nightclubs - STRICTLY PROHIBITED
+- Hostess bars - STRICTLY PROHIBITED
 
 **EXPLICITLY PERMITTED in APAC/Japan** (but with cost restrictions):
 - Business dinners (limited to $50/person gift max)
