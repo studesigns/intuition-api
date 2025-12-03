@@ -362,6 +362,10 @@ def _remove_hallucinations_from_json(json_obj: Dict[str, any]) -> Dict[str, any]
 
         text = json_obj[field]
 
+        # CRITICAL: Ensure text is a string before regex operations
+        if not isinstance(text, str):
+            text = str(text) if text else ""
+
         # CRITICAL HALLUCINATION REMOVAL PATTERNS
         # Pattern 1: Remove ", including [Location]" constructs
         # Examples: ", including Germany" or ", including Japan"
