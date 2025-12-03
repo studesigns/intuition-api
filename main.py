@@ -864,7 +864,7 @@ Return ONLY valid JSON (NO other text):
                 print(f"  ✓ SANITY CHECK RULE 3: Prohibited activity in non-APAC location, forcing APPROVE")
                 location_analysis["action"] = "APPROVE"
                 location_analysis["risk_level"] = "LOW"
-                location_analysis["reason"] = location_analysis.get("reason", "") + " [NOTE: Activity restrictions apply to APAC region only, not to {0}]".format(entity.upper())
+                location_analysis["reason"] = location_analysis.get("reason", "") + f" [NOTE: Activity restrictions apply to APAC region only, not to {entity.upper()}]"
 
             print(f"  [SANITY CHECK RESULT] action={location_analysis.get('action')}, risk={location_analysis.get('risk_level')}")
 
