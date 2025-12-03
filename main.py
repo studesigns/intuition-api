@@ -625,7 +625,7 @@ TASK:
 1. Analyze the question: {question}
 2. Apply ONLY the policies above that explicitly apply to {entity.upper()}
 3. Determine the risk level and recommended action
-4. Provide your analysis in JSON format
+4. Provide your analysis in the EXACT JSON format below
 
 CRITICAL RULES:
 - If a policy says "APAC region" but {entity.upper()} is not listed, that policy does NOT apply
@@ -633,7 +633,15 @@ CRITICAL RULES:
 - Only return risk assessment based on retrieved documents
 - Do NOT add information not in the documents
 
-Return ONLY valid JSON object."""
+REQUIRED JSON FORMAT (fill in the values):
+{{
+  "risk_level": "CRITICAL|HIGH|MODERATE|LOW|UNKNOWN",
+  "action": "BLOCK|FLAG|APPROVE|UNKNOWN",
+  "summary": "Brief 1-2 sentence summary",
+  "reason": "Explanation based on retrieved documents"
+}}
+
+Return ONLY the JSON object, no other text."""
 
         try:
             response = llm.invoke(location_prompt)
