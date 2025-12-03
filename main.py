@@ -755,12 +755,19 @@ Return ONLY valid JSON (NO other text):
             prohibition_keywords = ["strictly prohibited", "banned", "not permitted", "zero tolerance"]
             has_prohibition = any(keyword in context_lower for keyword in prohibition_keywords)
 
+            # DEBUG
+            print(f"\n[DEBUG ESCALATION] {entity.upper()}:")
+            print(f"  has_prohibition={has_prohibition}, action={location_analysis.get('action')}, risk_level={location_analysis.get('risk_level')}")
+
             # If we found strict prohibition language AND the action matches what was banned
             if has_prohibition and location_analysis.get("action") == "BLOCK":
                 # Force to CRITICAL if LLM under-assigned
                 if location_analysis.get("risk_level") in ["HIGH", "MODERATE"]:
+                    print(f"  ✓ ESCALATING to CRITICAL")
                     location_analysis["risk_level"] = "CRITICAL"
                     location_analysis["reason"] = location_analysis.get("reason", "") + " [ESCALATED TO CRITICAL: Document contains 'strictly prohibited' language with suspension/termination consequences]"
+                else:
+                    print(f"  - Already {location_analysis.get('risk_level')}, no escalation needed")
 
             all_analyses[entity] = location_analysis
 
