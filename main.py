@@ -714,29 +714,44 @@ For Germany specifically:
 - The APAC-only documents do NOT apply to Germany
 - Therefore: Karaoke entertainment = PERMITTED (LOW risk)
 
+===== JAPAN/APAC SPECIFIC - WHAT IS & ISN'T PROHIBITED =====
+**EXPLICITLY PROHIBITED in APAC/Japan** (from Section 3.1.1):
+- Karaoke (KTV)
+- Nightclubs
+- Hostess bars
+
+**EXPLICITLY PERMITTED in APAC/Japan** (even though there are restrictions on gifts):
+- Business dinners
+- Client lunches
+- Golf outings
+- Client meetings
+- All other activities NOT on the prohibited list above
+
+CRITICAL: Just because there is a gift limit ($50 max) does NOT mean the activity is prohibited.
+The activity itself (dinner, golf, lunch) is ALLOWED. Only the gift value is limited.
+
 ===== RISK & ACTION ASSIGNMENT GUIDE =====
 **CRITICAL + BLOCK**: Activity is strictly prohibited/banned with immediate suspension/termination
-  - Use WHEN: Document says "strictly prohibited", "banned", "not permitted", with "suspension" or "termination"
+  - Use WHEN: Activity is explicitly listed as prohibited (Karaoke, Nightclub, Hostess bar for Japan/APAC)
   - Action: BLOCK (do not approve under any circumstances)
 
 **HIGH + BLOCK**: Activity is prohibited with limited exceptions only
-  - Use WHEN: Document says "prohibited" but may allow exceptions or case-by-case review
+  - Use WHEN: Document says prohibited but may allow exceptions or case-by-case review
   - Action: BLOCK (but may be overridable with special approval)
 
 **MODERATE + FLAG**: Activity requires approval/conditions
   - Use WHEN: Activity needs pre-approval, training, or special circumstances to proceed
   - Action: FLAG (send for manager review/approval)
 
-**LOW + APPROVE**: Activity is explicitly permitted
-  - Use WHEN: No policy forbids the action
-  - Action: APPROVE (can proceed)
+**LOW + APPROVE**: Activity is explicitly permitted or not mentioned in prohibitions
+  - Use WHEN: No policy forbids this specific activity
+  - Action: APPROVE (can proceed - but follow any cost/gift limits)
 
 **IMPORTANT ACTION RULES**:
-- If "strictly prohibited" language with suspension → BLOCK
-- If "prohibited" but no suspension language → BLOCK
-- If "requires approval" language → FLAG
-- If no restriction found → APPROVE
-- For {entity.upper()}: MUST use BLOCK if the policy contains prohibition keywords
+- ONLY BLOCK if the specific activity is explicitly listed as prohibited
+- If activity is NOT on the prohibited list → APPROVE
+- Gift/cost limits restrict AMOUNTS, not the activity itself → Still APPROVE the activity
+- For Japan: BLOCK only for Karaoke, Nightclub, Hostess bar. All other activities = APPROVE
 
 ===== RESPONSE FORMAT =====
 Return ONLY valid JSON (NO other text):
