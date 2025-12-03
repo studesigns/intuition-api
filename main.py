@@ -352,10 +352,12 @@ def extract_metadata_from_content(content: str, chunk: str) -> Dict[str, any]:
     # (because global policies list all regions they apply to)
 
     # === DETECT APAC SCOPE (highest priority - has restrictions) ===
+    # CRITICAL FIX: Check FULL DOCUMENT content (not just chunk) for scope detection
+    # This ensures ALL chunks from a regional document get the same region tag
     # Look for explicit APAC/Asia-Pacific titles AND "prohibited in" which indicates restrictions
-    if ("asia-pacific region" in chunk_lower or "apac region" in chunk_lower) and ("prohibited" in content_lower or "high-risk" in content_lower):
+    if ("asia-pacific region" in content_lower or "apac region" in content_lower or "regional addendum: apac" in content_lower or "regional addendum: asia" in content_lower) and ("prohibited" in content_lower or "high-risk" in content_lower):
         regions = ["APAC"]
-    elif any(phrase in content_lower for phrase in ["prohibited in: apac", "prohibited in: china", "prohibited in: japan", "apac-specific"]):
+    elif any(phrase in content_lower for phrase in ["prohibited in: apac", "prohibited in: china", "prohibited in: japan", "apac-specific", "asia-pacific"]):
         regions = ["APAC"]
     # === DETECT US SCOPE ===
     elif any(phrase in content_lower for phrase in ["us region", "united states only", "us scope"]) and "does not apply" not in content_lower:
