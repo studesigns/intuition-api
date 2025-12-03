@@ -1001,7 +1001,6 @@ async def query_policies(request: dict):
 
         # Create summary that reflects the overall assessment
         # For multi-location queries, show the overall status, not just one location
-        print(f"DEBUG: analyses_by_location keys: {list(analyses_by_location.keys())}, count: {len(analyses_by_location)}")
         if len(analyses_by_location) > 1:
             # Multi-location: show overall compliance status
             if risk_level == "CRITICAL":
