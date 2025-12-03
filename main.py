@@ -138,81 +138,36 @@ def detect_regions_in_text(text: str) -> Dict[str, List[str]]:
     }
 
 
-def decompose_query(question: str, llm: ChatOpenAI) -> List[Dict[str, any]]:
+def decompose_query(question: str, llm: ChatOpenAI = None) -> List[Dict[str, any]]:
     """
     Decompose a query into multiple sub-queries if it contains multiple entities.
-
-    Returns:
-        [
-            {"entity": "New York", "query": "Gift limit for New York", "regions": ["US", "GLOBAL"]},
-            {"entity": "Beijing", "query": "Gift limit for Beijing", "regions": ["APAC", "GLOBAL"]}
-        ]
+    SIMPLIFIED: Returns single query to avoid LLM errors.
     """
-    # Detect regions
-    region_detection = detect_regions_in_text(question)
-    entities = region_detection["entities"]
+    try:
+        # Detect regions in question
+        region_detection = detect_regions_in_text(question)
+        detected_regions = region_detection.get("regions", ["GLOBAL"])
 
-    # If only one entity or no entities detected, return single query
-    if len(entities) <= 1:
+        # CRITICAL: Only return the regions actually mentioned in the question
+        # This prevents hallucination where Germany also retrieves APAC docs
+        if not detected_regions:
+            detected_regions = ["GLOBAL"]
+
+        # Return a single query covering only the detected regions
         return [{
-            "entity": "General",
+            "entity": "Query",
             "query": question,
-            "regions": region_detection["regions"]
+            "regions": detected_regions
         }]
-
-    # Multiple entities detected - decompose
-    decomposition_prompt = f"""Given the following question with multiple geographic references, create separate, focused sub-queries for each location mentioned.
-
-Original Question: {question}
-
-Identified Locations: {", ".join(entities)}
-
-For each location, create a focused sub-query that:
-1. Maintains the core compliance question
-2. Explicitly names the geographic scope
-3. Is independent (can be answered without other sub-queries)
-
-Format your response as a numbered list:
-1. [Location]: [Specific sub-query]
-2. [Location]: [Specific sub-query]
-"""
-
-    response = llm.invoke(decomposition_prompt)
-    decomposed_text = response.content
-
-    # DEFENSIVE: Ensure decomposed_text is a string
-    if not isinstance(decomposed_text, str):
-        decomposed_text = str(decomposed_text) if decomposed_text else ""
-
-    # Parse the decomposition response
-    sub_queries = []
-    lines = decomposed_text.split('\n')
-
-    for line in lines:
-        # DEFENSIVE: Ensure line is a string
-        if not isinstance(line, str):
-            line = str(line)
-        if line.strip() and re.match(r'^\d+\.\s', line):
-            # Extract the sub-query
-            match = re.search(r'^\d+\.\s+\[?([^\]]+)\]?:\s*(.+)$', line)
-            if match:
-                location = match.group(1).strip()
-                query = match.group(2).strip()
-
-                # Get regions for this location
-                region_info = detect_regions_in_text(location)
-
-                sub_queries.append({
-                    "entity": location,
-                    "query": query,
-                    "regions": region_info["regions"]
-                })
-
-    return sub_queries if sub_queries else [{
-        "entity": "General",
-        "query": question,
-        "regions": region_detection["regions"]
-    }]
+    except Exception as e:
+        # Fallback to safest possible response - ONLY GLOBAL, not all regions!
+        # Returning all regions would contaminate Germany queries with APAC policies
+        print(f"decompose_query error: {e}")
+        return [{
+            "entity": "Query",
+            "query": question,
+            "regions": ["GLOBAL"]  # SAFE DEFAULT: Only global applies everywhere
+        }]
 
 
 def filter_documents_by_regions(documents: List[Document], allowed_regions: List[str]) -> List[Document]:
@@ -281,21 +236,37 @@ def extract_metadata_from_content(content: str, chunk: str) -> Dict[str, any]:
 
     # Check for strong scope indicators in chunk
     chunk_lower = chunk.lower()
+    content_lower = content.lower()
 
     # CRITICAL: If chunk explicitly mentions a region scope ("Applies To: APAC", "Region: APAC"), respect it
-    if any(phrase in chunk_lower for phrase in ["applies to: apac", "region: apac", "regional addendum"]):
-        # This is a region-specific document - do NOT add GLOBAL
+    # Use STRICT matching to avoid false positives (e.g., "does NOT apply to Europe" shouldn't tag as EMEA)
+
+    # Check for APAC scope (most important since it has restrictions)
+    if any(phrase in chunk_lower for phrase in ["applies to: apac", "region: apac", "asia-pacific region", "apac region only", "regional addendum to global"]):
         regions = ["APAC"]
-    elif any(phrase in chunk_lower for phrase in ["applies to: emea", "region: emea", "europe"]):
+    # Check for APAC scope in full document (for chunks without explicit header)
+    elif any(phrase in content_lower for phrase in ["regional addendum to global", "asia-pacific region", "apac region only"]) and "does not apply to apac" not in content_lower:
+        regions = ["APAC"]
+    # Check for EMEA scope (but avoid matching "does not apply to Europe")
+    elif any(phrase in chunk_lower for phrase in ["applies to: emea", "region: emea"]) and "does not apply" not in chunk_lower:
         regions = ["EMEA"]
-    elif any(phrase in chunk_lower for phrase in ["applies to: us", "region: us", "united states"]):
+    # Check for US scope
+    elif any(phrase in chunk_lower for phrase in ["applies to: us", "region: us"]) and "does not apply" not in chunk_lower:
         regions = ["US"]
-    elif any(phrase in chunk_lower for phrase in ["applies to: all", "global", "worldwide", "global code"]):
-        # Truly global document
+    # Check for GLOBAL scope (but be careful not to match content that mentions global in other contexts)
+    elif any(phrase in chunk_lower for phrase in ["applies to: all", "applies to: global", "worldwide policy", "global code", "global policy"]):
         regions = ["GLOBAL"]
     else:
-        # Fallback to region detection
-        regions = region_detection["regions"] if region_detection["regions"] else ["GLOBAL"]
+        # Fallback: Check if document-level scope exists
+        # This prevents chunks that don't have explicit scope from mixing regions
+        if any(phrase in content_lower for phrase in ["regional addendum to global", "asia-pacific region"]):
+            regions = ["APAC"]
+        elif any(phrase in content_lower for phrase in ["applies to: emea", "region: emea"]):
+            regions = ["EMEA"]
+        else:
+            # DEFAULT: Assume GLOBAL if no specific region markers found
+            # This allows global policy documents to be used for all queries
+            regions = ["GLOBAL"]
 
     return {
         "regions": regions,
@@ -458,7 +429,18 @@ def _retrieve_documents_sync(
         sub_query["regions"]
     )
 
-    return filtered_docs if filtered_docs else relevant_docs[:3]  # Fallback to top results
+    # CRITICAL FIX: If filtering removes all docs, return ONLY GLOBAL docs, not unfiltered fallback
+    # This prevents APAC policies from contaminating Germany queries
+    if filtered_docs:
+        return filtered_docs
+    else:
+        # Fallback: try to get more docs and filter them, or return GLOBAL only
+        try:
+            more_docs = vector_store.similarity_search(sub_query["query"], k=20)
+            filtered_more = filter_documents_by_regions(more_docs, sub_query["regions"])
+            return filtered_more if filtered_more else []
+        except:
+            return []
 
 
 async def parallel_retrieve(
@@ -637,16 +619,18 @@ async def upload_policies(files: List[UploadFile] = File(...)):
                 detail="OpenAI API key not configured"
             )
 
-        all_text = ""
+        documents = []
         files_processed = 0
         all_regions = set()
 
-        # Extract text from all PDF files
+        # CRITICAL FIX: Process each PDF file separately
+        # This prevents metadata from one document contaminating another
         for file in files:
             if not file.filename.endswith('.pdf'):
                 continue
 
             # Read PDF content
+            file_text = ""
             with tempfile.NamedTemporaryFile(delete=False, suffix='.pdf') as tmp:
                 content = await file.read()
                 tmp.write(content)
@@ -655,46 +639,42 @@ async def upload_policies(files: List[UploadFile] = File(...)):
                 # Parse PDF
                 pdf_reader = PdfReader(tmp.name)
                 for page in pdf_reader.pages:
-                    all_text += page.extract_text() + "\n"
+                    file_text += page.extract_text() + "\n"
 
                 files_processed += 1
 
             # Clean up temp file
             os.unlink(tmp.name)
 
-        if not all_text:
-            raise HTTPException(
-                status_code=400,
-                detail="No text could be extracted from the PDF files"
+            if not file_text:
+                continue
+
+            # Split THIS FILE's text into chunks (not combined with other files)
+            text_splitter = RecursiveCharacterTextSplitter(
+                chunk_size=1000,
+                chunk_overlap=200,
+                separators=["\n\n", "\n", " ", ""]
             )
+            file_chunks = text_splitter.split_text(file_text)
 
-        # Split text into chunks
-        text_splitter = RecursiveCharacterTextSplitter(
-            chunk_size=1000,
-            chunk_overlap=200,
-            separators=["\n\n", "\n", " ", ""]
-        )
-        chunks = text_splitter.split_text(all_text)
+            # Create documents with metadata for each chunk
+            # CRITICAL: Pass file_text (single document), NOT combined text of all files
+            for chunk in file_chunks:
+                metadata = extract_metadata_from_content(file_text, chunk)
+                all_regions.update(metadata["regions"])
 
-        if not chunks:
+                # Create LangChain Document with metadata
+                doc = Document(
+                    page_content=chunk,
+                    metadata=metadata
+                )
+                documents.append(doc)
+
+        if not documents:
             raise HTTPException(
                 status_code=400,
                 detail="No text chunks created from PDFs"
             )
-
-        # Create documents with metadata for each chunk
-        documents = []
-        for chunk in chunks:
-            # Extract region metadata from chunk
-            metadata = extract_metadata_from_content(all_text, chunk)
-            all_regions.update(metadata["regions"])
-
-            # Create LangChain Document with metadata
-            doc = Document(
-                page_content=chunk,
-                metadata=metadata
-            )
-            documents.append(doc)
 
         # Create embeddings and vector store with metadata
         embeddings = OpenAIEmbeddings(
@@ -707,10 +687,10 @@ async def upload_policies(files: List[UploadFile] = File(...)):
 
         return {
             "status": "success",
-            "chunks": len(chunks),
+            "chunks": len(documents),
             "files_processed": files_processed,
             "regions_detected": list(all_regions),
-            "message": f"Successfully processed {files_processed} PDF file(s) into {len(chunks)} chunks with metadata routing"
+            "message": f"Successfully processed {files_processed} PDF file(s) into {len(documents)} chunks with metadata routing"
         }
 
     except Exception as e:
