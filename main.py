@@ -194,15 +194,20 @@ def decompose_query(question: str, llm: ChatOpenAI = None) -> List[Dict[str, any
         # Detect regions in question
         region_detection = detect_regions_in_text(question)
         detected_regions = region_detection.get("regions", ["GLOBAL"])
+        detected_entities = region_detection.get("entities", [])
 
         # CRITICAL: Only return the regions actually mentioned in the question
         # This prevents hallucination where Germany also retrieves APAC docs
         if not detected_regions:
             detected_regions = ["GLOBAL"]
 
+        # Use actual detected location as entity, not generic "Query"
+        # This helps LLM understand which location is being asked about
+        entity_name = detected_entities[0] if detected_entities else "General"
+
         # Return a single query covering only the detected regions
         return [{
-            "entity": "Query",
+            "entity": entity_name,
             "query": question,
             "regions": detected_regions
         }]
@@ -211,7 +216,7 @@ def decompose_query(question: str, llm: ChatOpenAI = None) -> List[Dict[str, any
         # Returning all regions would contaminate Germany queries with APAC policies
         print(f"decompose_query error: {e}")
         return [{
-            "entity": "Query",
+            "entity": "General",
             "query": question,
             "regions": ["GLOBAL"]  # SAFE DEFAULT: Only global applies everywhere
         }]
@@ -288,9 +293,15 @@ def extract_metadata_from_content(content: str, chunk: str) -> Dict[str, any]:
     # CRITICAL: EXPLICIT REGION DETECTION ONLY
     # If a document explicitly states it's regional (APAC, EMEA, US), respect that.
     # Otherwise, assume GLOBAL by default (safer for policy documents).
+    #
+    # KEY: Look for "Regional Addendum" or "APAC-only" language, NOT just region names
+    # (because global policies list all regions they apply to)
 
     # === DETECT APAC SCOPE (highest priority - has restrictions) ===
-    if any(phrase in content_lower for phrase in ["asia-pacific region", "regional addendum to global", "apac region only", "apac - prohibited", "prohibited in apac"]):
+    # Look for explicit APAC/Asia-Pacific titles AND "prohibited in" which indicates restrictions
+    if ("asia-pacific region" in chunk_lower or "apac region" in chunk_lower) and ("prohibited" in content_lower or "high-risk" in content_lower):
+        regions = ["APAC"]
+    elif any(phrase in content_lower for phrase in ["prohibited in: apac", "prohibited in: china", "prohibited in: japan", "apac-specific"]):
         regions = ["APAC"]
     # === DETECT US SCOPE ===
     elif any(phrase in content_lower for phrase in ["us region", "united states only", "us scope"]) and "does not apply" not in content_lower:
@@ -804,11 +815,11 @@ async def query_policies(request: dict):
             sub_queries = decompose_query(question, llm)
         except Exception as decompose_error:
             print(f"Query decomposition error: {decompose_error}")
-            # Fallback: treat whole question as single query
+            # Fallback: SAFE DEFAULT - only GLOBAL applies everywhere, prevent cross-region contamination
             sub_queries = [{
-                "entity": "general",
+                "entity": "General",
                 "query": question,
-                "regions": ["GLOBAL", "APAC", "EMEA", "US"]
+                "regions": ["GLOBAL"]  # SAFE: Only GLOBAL prevents regional contamination
             }]
 
         # ===== STEP 2: PARALLEL RETRIEVAL WITH METADATA FILTERING =====
