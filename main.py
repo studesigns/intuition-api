@@ -609,39 +609,37 @@ def synthesize_comparative_answer(
         # Create location-specific prompt
         location_prompt = f"""{RISK_OFFICER_PROMPT}
 
-USER LOCATION: {entity.upper()}
+===== ANALYZING {entity.upper()} ONLY =====
+
+Your task is to analyze ONLY policies for: {entity.upper()}
+
 ORIGINAL QUESTION: {question}
 
-CRITICAL: You are analyzing policies for [{entity.upper()}] ONLY.
-- Use ONLY the retrieved documents below
-- Do NOT apply policies from other regions or locations
-- Do NOT use general knowledge about geography
-- Do NOT infer what location belongs to what region
+===== CRITICAL ANALYSIS RULES =====
+1. You MUST analyze the question AS IT APPLIES TO {entity.upper()}
+2. You MUST NOT analyze other locations mentioned in the question
+3. You MUST NOT mix analysis of different locations
+4. If the question mentions multiple locations, analyze ONLY what applies to {entity.upper()}
+5. Do NOT speculate about other locations
+6. If a policy explicitly mentions {entity.upper()}, it applies
+7. If a policy says "APAC region" without listing {entity.upper()}, it does NOT apply
+8. If a policy says "GLOBAL" or "applies to all regions", it applies to {entity.upper()}
 
-RETRIEVED POLICY DOCUMENTS FOR {entity.upper()}:
+===== RETRIEVED POLICY DOCUMENTS FOR {entity.upper()} =====
 {context}
 
-TASK:
-1. Analyze the question: {question}
-2. Apply ONLY the policies above that explicitly apply to {entity.upper()}
-3. Determine the risk level and recommended action
-4. Provide your analysis in the EXACT JSON format below
+===== YOUR TASK =====
+Analyze the question AS IT APPLIES TO {entity.upper()} ONLY based on the retrieved documents above.
+Determine the risk level and recommended action for {entity.upper()}.
 
-CRITICAL RULES:
-- If a policy says "APAC region" but {entity.upper()} is not listed, that policy does NOT apply
-- If a policy says "GLOBAL" or "applies to all regions", it applies to {entity.upper()}
-- Only return risk assessment based on retrieved documents
-- Do NOT add information not in the documents
-
-REQUIRED JSON FORMAT (fill in the values):
+===== RESPONSE FORMAT =====
+Return ONLY valid JSON with this exact structure (NO other text):
 {{
   "risk_level": "CRITICAL|HIGH|MODERATE|LOW|UNKNOWN",
   "action": "BLOCK|FLAG|APPROVE|UNKNOWN",
-  "summary": "Brief 1-2 sentence summary",
+  "summary": "Brief summary for {entity.upper()} only",
   "reason": "Explanation based on retrieved documents"
-}}
-
-Return ONLY the JSON object, no other text."""
+}}"""
 
         try:
             response = llm.invoke(location_prompt)
