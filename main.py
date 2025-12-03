@@ -14,9 +14,52 @@ from langchain.chains.qa_with_sources import load_qa_with_sources_chain
 from langchain.schema import Document
 from pypdf import PdfReader
 from dotenv import load_dotenv
+import json
 
 # Load environment variables
 load_dotenv()
+
+# ===== DEFENSIVE JSON PARSING =====
+
+def extract_clean_json(raw_text):
+    """
+    Defensive JSON extraction with multi-layer fallback strategy.
+
+    Handles:
+    - Markdown code blocks (```json ... ```)
+    - Raw JSON with extra whitespace
+    - Malformed responses with partial JSON
+
+    Always returns a valid dict, never crashes.
+    """
+    if not isinstance(raw_text, str):
+        raw_text = str(raw_text) if raw_text else "{}"
+
+    # Remove markdown code blocks
+    clean = re.sub(r'```json\s*', '', raw_text)
+    clean = re.sub(r'```', '', clean).strip()
+
+    # Try direct parse
+    try:
+        return json.loads(clean)
+    except json.JSONDecodeError:
+        pass
+
+    # Fallback: Regex finding the first { and last }
+    match = re.search(r'\{[\s\S]*\}', clean)
+    if match:
+        try:
+            return json.loads(match.group(0))
+        except json.JSONDecodeError:
+            pass
+
+    # Fail-safe return
+    return {
+        "risk_level": "MODERATE",
+        "action": "FLAG",
+        "violation_summary": "Format Error",
+        "detailed_analysis": f"Could not parse AI response. Raw output: {raw_text[:500]}"
+    }
 
 # Initialize FastAPI app
 app = FastAPI(title="Compliance Risk Engine API", version="1.0.0")
@@ -106,44 +149,37 @@ REGION_MAPPING = {
     "europe": {"regions": ["EMEA", "GLOBAL"], "aliases": ["emea"]},
 }
 
-# Gold Standard Compliance Meta-Engine
-RISK_OFFICER_PROMPT = """### SYSTEM ROLE:
-You are an Autonomous Compliance Adjudicator. Your role is to evaluate user actions against a set of retrieved policy documents.
-Your specific mandate is to prevent "Context Pollution" by strictly enforcing **Jurisdictional Scope** and **Hierarchy of Authority**.
+# Universal Compliance Meta-Engine
+RISK_OFFICER_PROMPT = """### SYSTEM ROLE: COMPLIANCE META-ENGINE
+You are an API backend designed to adjudicate user actions against uploaded policy documents.
 
-### CORE OPERATING PROTOCOL (THE 4-STEP PIPELINE):
+### EXECUTION PIPELINE (MANDATORY):
 
-**STEP 1: CONTEXT EXTRACTION (Silent)**
-- Analyze the User Query to identify:
-  1. **Subject Location:** (e.g., "Germany", "New York", "Remote")
-  2. **Subject Role:** (e.g., "Intern", "Director", "Contractor")
-  3. **Action:** (e.g., "Karaoke", "Gift giving", "Working at heights")
+**1. SCOPE FILTER:**
+For each retrieved text chunk, identify its "Jurisdiction" (e.g., "Applies to APAC", "Applies to Senior VPs", "Global").
+If the User's location/role does not match the chunk's stated scope, DISCARD that chunk immediately.
+- Example: Document says "Regional Addendum: APAC" + User is in "Germany" → DISCARD
+- Example: Document says "Global Policy" + User anywhere → INCLUDE
+- No scope stated = assume GLOBAL
 
-**STEP 2: DOCUMENT SCOPE FILTERING (CRITICAL)**
-- You will be provided with multiple text chunks. For *each* chunk, you must extract its "Scope of Application" from the header or intro.
-- **The Scope Test:**
-  - If a document says "Applies to: APAC", and the User is in "Germany" -> **DISCARD** this document immediately. It is irrelevant.
-  - If a document says "Applies to: Senior VPs", and the User is an "Intern" -> **DISCARD**.
-  - If a document has NO specific scope, assume it is **GLOBAL** (Applies to everyone).
+**2. CONFLICT RESOLUTION:**
+If two active policies conflict (one permits, one forbids), apply this hierarchy:
+  - Level 1: Specific Regional/Local Addendum (Overrides everything)
+  - Level 2: Global Mandatory Policy
+  - Level 3: General Guidelines
+- Example: Global says "Gifts <$150 OK", Japan Addendum says "Gifts $0" → Result: $0 applies
 
-**STEP 3: HIERARCHY OF AUTHORITY (CONFLICT RESOLUTION)**
-- If multiple valid documents apply to the user, but they conflict (one says "Allowed", one says "Banned"), use this Precedence Order:
-  1. **Local/Regional Addendums:** (Highest Authority - Specific overrides General).
-  2. **Global Mandatory Policy:** (Medium Authority).
-  3. **General Guidelines/Code of Conduct:** (Lowest Authority).
-- *Example:* Global Policy says "Gifts <$150 ok". Japan Addendum says "Gifts $0". User is in Japan. -> Result: **$0 Limit applies.**
+**3. DEFAULT STANCE:**
+If no *active* policy explicitly forbids the action, it is PERMITTED.
+This is critical: absence of prohibition = permission.
 
-**STEP 4: FINAL ADJUDICATION**
-- Based *only* on the documents that passed the Scope Test and won the Hierarchy Check, determine the status.
-- **DEFAULT STATE:** If no active policy explicitly forbids an action, it is PERMITTED.
-
-### OUTPUT FORMAT (STRICT JSON):
-You must output ONLY a valid JSON object. No markdown, no conversational text.
+### OUTPUT FORMAT (PURE JSON):
+Return ONLY a raw JSON object (no markdown, no extra text):
 {
   "risk_level": "CRITICAL" | "HIGH" | "MODERATE" | "LOW",
   "action": "BLOCK" | "FLAG" | "APPROVE",
-  "violation_summary": "Short, punchy title (Max 5 words)",
-  "detailed_analysis": "A clear explanation. You MUST reference the 'Why'. E.g., 'Allowed because the APAC restrictions do not apply to Germany.' or 'Blocked due to Japan Regional Override (Section 2.1).'"
+  "violation_summary": "Short title (max 5 words)",
+  "detailed_analysis": "Explain your reasoning. Cite specific policy sections. State why policies apply or were ignored due to scope."
 }
 """
 
@@ -777,8 +813,8 @@ Return ONLY valid JSON (NO other text):
             if not isinstance(result, str):
                 result = str(result)
 
-            # Parse the response
-            location_analysis = extract_json_from_response(result)
+            # Parse the response using defensive JSON extraction
+            location_analysis = extract_clean_json(result)
 
             # CRITICAL FIX: Post-process to force CRITICAL if document contains prohibition keywords
             # This ensures "strictly prohibited" items are marked CRITICAL even if LLM assigns HIGH
@@ -1086,21 +1122,17 @@ async def query_policies(request: dict):
         sources = [doc.page_content[:200] + "..." for doc in all_docs[:5]]  # Top 5
 
         # ===== Extract JSON Classification from Response =====
-        # synthesize_comparative_answer returns JSON with structure: {analyses_by_location: {...}, overall_risk: "..."}
-        try:
-            json_classification = extract_json_from_response(answer)
-        except Exception as extract_error:
-            # Fallback if extraction fails
-            print(f"JSON extraction error: {extract_error}")
+        # Use the new defensive JSON extraction with multi-layer fallback
+        json_classification = extract_clean_json(answer)
+
+        # Ensure we have the expected structure even if LLM returned simpler format
+        if "analyses_by_location" not in json_classification:
+            # If LLM returned simple format, wrap it
             json_classification = {
                 "analyses_by_location": {
-                    "General": {
-                        "risk_level": "MODERATE",
-                        "action": "FLAG",
-                        "summary": "Analysis interpretation required"
-                    }
+                    "General": json_classification
                 },
-                "overall_risk": "MODERATE"
+                "overall_risk": json_classification.get("risk_level", "MODERATE")
             }
 
         # Extract overall risk and location-specific analyses
