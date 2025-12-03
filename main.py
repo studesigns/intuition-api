@@ -112,6 +112,10 @@ def detect_regions_in_text(text: str) -> Dict[str, List[str]]:
             "regions": ["US", "APAC", "GLOBAL"]
         }
     """
+    # DEFENSIVE: Ensure text is a string
+    if not isinstance(text, str):
+        text = str(text) if text else ""
+
     text_lower = text.lower()
     detected_entities = []
     detected_regions = set(["GLOBAL"])  # Global always applies
@@ -260,6 +264,12 @@ def extract_metadata_from_content(content: str, chunk: str) -> Dict[str, any]:
     - If full document content mentions "Applies To: All Employees Globally" → regions=["GLOBAL"]
     - If chunk mentions APAC scope indicators → regions=["APAC"]
     """
+    # DEFENSIVE: Ensure inputs are strings
+    if not isinstance(chunk, str):
+        chunk = str(chunk) if chunk else ""
+    if not isinstance(content, str):
+        content = str(content) if content else ""
+
     region_detection = detect_regions_in_text(chunk)
 
     # Check for strong scope indicators in chunk
