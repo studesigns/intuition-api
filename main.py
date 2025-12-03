@@ -715,13 +715,19 @@ For Germany specifically:
 - Therefore: Karaoke entertainment = PERMITTED (LOW risk)
 
 ===== RISK LEVEL ASSIGNMENT GUIDE =====
-- CRITICAL: Activity is strictly prohibited with immediate suspension/termination consequences (BLOCK)
-- HIGH: Activity is prohibited but with review/case-by-case exceptions (BLOCK or FLAG)
-- MODERATE: Activity requires approval/conditions but is generally permissible (FLAG or APPROVE)
-- LOW: Activity is explicitly permitted with no restrictions (APPROVE)
-- UNKNOWN: No applicable policy found (FLAG)
+**CRITICAL**: Activity is strictly prohibited/banned with immediate suspension/termination consequences (BLOCK)
+  - Keywords that indicate CRITICAL: "strictly prohibited", "banned", "not permitted", "immediate suspension", "termination", "zero tolerance"
+  - If you see ANY of these keywords with the action in question, assign CRITICAL immediately
 
-For {entity.upper()}: If any document says the action is "strictly prohibited" or "banned" with suspension/termination, use CRITICAL.
+**HIGH**: Activity is prohibited but with review/case-by-case exceptions (BLOCK or FLAG)
+
+**MODERATE**: Activity requires approval/conditions but is generally permissible (FLAG or APPROVE)
+
+**LOW**: Activity is explicitly permitted with no restrictions (APPROVE)
+
+**UNKNOWN**: No applicable policy found (FLAG)
+
+IMPORTANT: For {entity.upper()}, scan the documents for words like "strictly prohibited", "banned", "suspension", "termination". If found with the action in question, MUST use CRITICAL risk level.
 
 ===== RESPONSE FORMAT =====
 Return ONLY valid JSON (NO other text):
@@ -740,6 +746,22 @@ Return ONLY valid JSON (NO other text):
 
             # Parse the response
             location_analysis = extract_json_from_response(result)
+
+            # CRITICAL FIX: Post-process to force CRITICAL if document contains prohibition keywords
+            # This ensures "strictly prohibited" items are marked CRITICAL even if LLM assigns HIGH
+            context_lower = context.lower()
+            result_lower = result.lower()
+
+            prohibition_keywords = ["strictly prohibited", "banned", "not permitted", "zero tolerance"]
+            has_prohibition = any(keyword in context_lower for keyword in prohibition_keywords)
+
+            # If we found strict prohibition language AND the action matches what was banned
+            if has_prohibition and location_analysis.get("action") == "BLOCK":
+                # Force to CRITICAL if LLM under-assigned
+                if location_analysis.get("risk_level") in ["HIGH", "MODERATE"]:
+                    location_analysis["risk_level"] = "CRITICAL"
+                    location_analysis["reason"] = location_analysis.get("reason", "") + " [ESCALATED TO CRITICAL: Document contains 'strictly prohibited' language with suspension/termination consequences]"
+
             all_analyses[entity] = location_analysis
 
         except Exception as e:
