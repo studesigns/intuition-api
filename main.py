@@ -766,6 +766,7 @@ Return ONLY valid JSON (NO other text):
 
             # DEBUG
             print(f"\n[DEBUG ESCALATION] {entity.upper()}:")
+            print(f"  Context preview: {context_lower[:150]}...")
             print(f"  has_prohibition={has_prohibition}, action={location_analysis.get('action')}, risk_level={location_analysis.get('risk_level')}")
 
             # If we found prohibition language, ensure correct action and risk level
