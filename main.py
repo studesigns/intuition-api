@@ -784,6 +784,21 @@ Return ONLY valid JSON (NO other text):
             print(f"  Context preview: {context_lower[:150]}...")
             print(f"  has_prohibition={has_prohibition}, action={location_analysis.get('action')}, risk_level={location_analysis.get('risk_level')}")
 
+            # SANITY CHECK FIRST: If LLM blocked something that's clearly not one of the prohibited activities
+            # Explicitly prohibited: karaoke, nightclub, hostess bar
+            # All others: APPROVE
+            question_lower = question.lower()
+            prohibited_activities = ["karaoke", "nightclub", "hostess bar", "hostess"]
+            is_prohibited_activity = any(activity in question_lower for activity in prohibited_activities)
+
+            if location_analysis.get("action") == "BLOCK" and not is_prohibited_activity:
+                # LLM blocked something that isn't explicitly prohibited
+                # Revert to APPROVE since we know only karaoke/nightclub/hostess are prohibited
+                print(f"  ⚠️ SANITY CHECK: Activity not explicitly prohibited, reverting to APPROVE")
+                location_analysis["action"] = "APPROVE"
+                location_analysis["risk_level"] = "LOW"
+                location_analysis["reason"] = location_analysis.get("reason", "") + " [NOTE: Not in explicit prohibition list, activity is permitted]"
+
             # If we found prohibition language, ensure correct action and risk level
             if has_prohibition:
                 # First: Convert FLAG to BLOCK if prohibition found
