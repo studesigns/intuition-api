@@ -714,20 +714,29 @@ For Germany specifically:
 - The APAC-only documents do NOT apply to Germany
 - Therefore: Karaoke entertainment = PERMITTED (LOW risk)
 
-===== RISK LEVEL ASSIGNMENT GUIDE =====
-**CRITICAL**: Activity is strictly prohibited/banned with immediate suspension/termination consequences (BLOCK)
-  - Keywords that indicate CRITICAL: "strictly prohibited", "banned", "not permitted", "immediate suspension", "termination", "zero tolerance"
-  - If you see ANY of these keywords with the action in question, assign CRITICAL immediately
+===== RISK & ACTION ASSIGNMENT GUIDE =====
+**CRITICAL + BLOCK**: Activity is strictly prohibited/banned with immediate suspension/termination
+  - Use WHEN: Document says "strictly prohibited", "banned", "not permitted", with "suspension" or "termination"
+  - Action: BLOCK (do not approve under any circumstances)
 
-**HIGH**: Activity is prohibited but with review/case-by-case exceptions (BLOCK or FLAG)
+**HIGH + BLOCK**: Activity is prohibited with limited exceptions only
+  - Use WHEN: Document says "prohibited" but may allow exceptions or case-by-case review
+  - Action: BLOCK (but may be overridable with special approval)
 
-**MODERATE**: Activity requires approval/conditions but is generally permissible (FLAG or APPROVE)
+**MODERATE + FLAG**: Activity requires approval/conditions
+  - Use WHEN: Activity needs pre-approval, training, or special circumstances to proceed
+  - Action: FLAG (send for manager review/approval)
 
-**LOW**: Activity is explicitly permitted with no restrictions (APPROVE)
+**LOW + APPROVE**: Activity is explicitly permitted
+  - Use WHEN: No policy forbids the action
+  - Action: APPROVE (can proceed)
 
-**UNKNOWN**: No applicable policy found (FLAG)
-
-IMPORTANT: For {entity.upper()}, scan the documents for words like "strictly prohibited", "banned", "suspension", "termination". If found with the action in question, MUST use CRITICAL risk level.
+**IMPORTANT ACTION RULES**:
+- If "strictly prohibited" language with suspension → BLOCK
+- If "prohibited" but no suspension language → BLOCK
+- If "requires approval" language → FLAG
+- If no restriction found → APPROVE
+- For {entity.upper()}: MUST use BLOCK if the policy contains prohibition keywords
 
 ===== RESPONSE FORMAT =====
 Return ONLY valid JSON (NO other text):
@@ -759,15 +768,23 @@ Return ONLY valid JSON (NO other text):
             print(f"\n[DEBUG ESCALATION] {entity.upper()}:")
             print(f"  has_prohibition={has_prohibition}, action={location_analysis.get('action')}, risk_level={location_analysis.get('risk_level')}")
 
-            # If we found strict prohibition language AND the action matches what was banned
-            if has_prohibition and location_analysis.get("action") == "BLOCK":
-                # Force to CRITICAL if LLM under-assigned
-                if location_analysis.get("risk_level") in ["HIGH", "MODERATE"]:
-                    print(f"  ✓ ESCALATING to CRITICAL")
-                    location_analysis["risk_level"] = "CRITICAL"
-                    location_analysis["reason"] = location_analysis.get("reason", "") + " [ESCALATED TO CRITICAL: Document contains 'strictly prohibited' language with suspension/termination consequences]"
-                else:
-                    print(f"  - Already {location_analysis.get('risk_level')}, no escalation needed")
+            # If we found prohibition language, ensure correct action and risk level
+            if has_prohibition:
+                # First: Convert FLAG to BLOCK if prohibition found
+                current_action = location_analysis.get("action")
+                if current_action == "FLAG":
+                    print(f"  ✓ CONVERTING action FLAG→BLOCK (prohibition found)")
+                    location_analysis["action"] = "BLOCK"
+
+                # Second: Escalate risk if needed
+                if location_analysis.get("action") == "BLOCK":
+                    # Force to CRITICAL if LLM under-assigned
+                    if location_analysis.get("risk_level") in ["HIGH", "MODERATE"]:
+                        print(f"  ✓ ESCALATING risk to CRITICAL")
+                        location_analysis["risk_level"] = "CRITICAL"
+                        location_analysis["reason"] = location_analysis.get("reason", "") + " [ESCALATED TO CRITICAL: Policy contains prohibition language]"
+                    else:
+                        print(f"  - Risk already {location_analysis.get('risk_level')}, action=BLOCK")
 
             all_analyses[entity] = location_analysis
 
