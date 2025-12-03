@@ -185,6 +185,42 @@ def detect_regions_in_text(text: str) -> Dict[str, List[str]]:
     }
 
 
+def extract_location_specific_question(original_question: str, entity: str) -> str:
+    """
+    Extract a location-specific sub-question from a multi-location query.
+
+    Example:
+    - Input: "I'm taking clients to karaoke in Germany and Japan. Should we go?"
+    - For entity "germany": "Can I take a client to karaoke in Germany?"
+    - For entity "japan": "Can I take a client to karaoke in Japan?"
+    """
+    # Common patterns to extract activity/context
+    patterns = [
+        r"taking.*?(client|customers?|team|staff).*?to\s+(\w+(?:\s+\w+)*)",  # "taking clients to X"
+        r"(client|customers?|team|staff)\s+(\w+(?:\s+\w+)*)\s+in",  # "client X in location"
+        r"activity.*?(?:in|at|for)\s+(\w+(?:\s+\w+)*)",  # "activity in X"
+    ]
+
+    # Try to extract the activity (e.g., "karaoke", "nightclub", etc.)
+    activity = ""
+    for pattern in patterns:
+        match = re.search(pattern, original_question, re.IGNORECASE)
+        if match:
+            if len(match.groups()) > 1:
+                activity = match.group(2)
+            else:
+                activity = match.group(1)
+            break
+
+    # If we couldn't extract activity, use a generic version
+    if not activity:
+        activity = "this activity"
+
+    # Create location-specific question
+    location_specific = f"Can I take a client to {activity.lower()} in {entity.title()}?"
+    return location_specific
+
+
 def decompose_query(question: str, llm: ChatOpenAI = None) -> List[Dict[str, any]]:
     """
     Decompose a query into multiple sub-queries if it contains multiple entities.
@@ -606,6 +642,10 @@ def synthesize_comparative_answer(
         # Build context for THIS location only
         context = "\n\n".join([doc.page_content for doc in docs])
 
+        # Create a location-specific sub-question for clarity
+        # This helps the LLM focus on just this location's analysis
+        location_question = extract_location_specific_question(question, entity) if "," in question or "and" in question.lower() else question
+
         # Create location-specific prompt
         location_prompt = f"""{RISK_OFFICER_PROMPT}
 
@@ -613,7 +653,8 @@ def synthesize_comparative_answer(
 
 Your task is to analyze ONLY policies for: {entity.upper()}
 
-ORIGINAL QUESTION: {question}
+LOCATION-SPECIFIC QUESTION: {location_question}
+(Original question for context: {question})
 
 ===== CRITICAL ANALYSIS RULES =====
 1. You MUST analyze the question AS IT APPLIES TO {entity.upper()}
@@ -629,8 +670,10 @@ ORIGINAL QUESTION: {question}
 {context}
 
 ===== YOUR TASK =====
-Analyze the question AS IT APPLIES TO {entity.upper()} ONLY based on the retrieved documents above.
-Determine the risk level and recommended action for {entity.upper()}.
+Analyze this location-specific question for {entity.upper()} ONLY:
+"{location_question}"
+
+Based ONLY on the retrieved documents above, determine the risk level and recommended action for {entity.upper()}.
 
 ===== RESPONSE FORMAT =====
 Return ONLY valid JSON with this exact structure (NO other text):
