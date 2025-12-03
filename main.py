@@ -714,13 +714,22 @@ For Germany specifically:
 - The APAC-only documents do NOT apply to Germany
 - Therefore: Karaoke entertainment = PERMITTED (LOW risk)
 
+===== RISK LEVEL ASSIGNMENT GUIDE =====
+- CRITICAL: Activity is strictly prohibited with immediate suspension/termination consequences (BLOCK)
+- HIGH: Activity is prohibited but with review/case-by-case exceptions (BLOCK or FLAG)
+- MODERATE: Activity requires approval/conditions but is generally permissible (FLAG or APPROVE)
+- LOW: Activity is explicitly permitted with no restrictions (APPROVE)
+- UNKNOWN: No applicable policy found (FLAG)
+
+For {entity.upper()}: If any document says the action is "strictly prohibited" or "banned" with suspension/termination, use CRITICAL.
+
 ===== RESPONSE FORMAT =====
 Return ONLY valid JSON (NO other text):
 {{
   "risk_level": "CRITICAL|HIGH|MODERATE|LOW|UNKNOWN",
   "action": "BLOCK|FLAG|APPROVE|UNKNOWN",
   "summary": "Brief summary for {entity.upper()}",
-  "reason": "Must state which policy applies and its scope. Examples: 'Karaoke is allowed in Germany - APAC prohibition only applies to APAC region' or 'Karaoke prohibited in Japan due to APAC Regional Addendum Section 3.1.1'"
+  "reason": "Must state which policy applies and its scope. Examples: 'Karaoke is allowed in Germany - APAC prohibition only applies to APAC region' or 'Karaoke prohibited in Japan due to APAC Regional Addendum Section 3.1.1 (CRITICAL: strictly prohibited with immediate suspension)'"
 }}"""
 
         try:
