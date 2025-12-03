@@ -773,7 +773,16 @@ async def query_policies(request: dict):
         )
 
         # ===== STEP 1: QUERY DECOMPOSITION =====
-        sub_queries = decompose_query(question, llm)
+        try:
+            sub_queries = decompose_query(question, llm)
+        except Exception as decompose_error:
+            print(f"Query decomposition error: {decompose_error}")
+            # Fallback: treat whole question as single query
+            sub_queries = [{
+                "entity": "general",
+                "query": question,
+                "regions": ["GLOBAL", "APAC", "EMEA", "US"]
+            }]
 
         # ===== STEP 2: PARALLEL RETRIEVAL WITH METADATA FILTERING =====
         retrieval_results = await parallel_retrieve(question, sub_queries, embeddings)
@@ -790,12 +799,16 @@ async def query_policies(request: dict):
 
         # ===== STEP 3: SYNTHESIS =====
         # Generate a single comprehensive answer using the isolated region contexts
-        answer = synthesize_comparative_answer(
-            question,
-            sub_queries,
-            retrieval_results,
-            llm
-        )
+        try:
+            answer = synthesize_comparative_answer(
+                question,
+                sub_queries,
+                retrieval_results,
+                llm
+            )
+        except Exception as synthesis_error:
+            print(f"Synthesis error: {synthesis_error}")
+            answer = '{"risk_level":"MODERATE","action":"FLAG","violation_summary":"Analysis in progress","detailed_analysis":"System encountered an error during synthesis"}'
 
         # Collect all sources from all regions
         all_docs = []
@@ -810,7 +823,17 @@ async def query_policies(request: dict):
 
         # ===== Extract JSON Classification from Response =====
         # The LLM includes a JSON block with violation_summary and other fields
-        json_classification = extract_json_from_response(answer)
+        try:
+            json_classification = extract_json_from_response(answer)
+        except Exception as extract_error:
+            # Fallback if extraction fails
+            print(f"JSON extraction error: {extract_error}")
+            json_classification = {
+                "risk_level": "MODERATE",
+                "action": "FLAG",
+                "violation_summary": "Analysis interpretation required",
+                "detailed_analysis": answer
+            }
 
         violation_summary = json_classification.get(
             "violation_summary",
