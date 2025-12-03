@@ -521,6 +521,7 @@ def _retrieve_documents_sync(
 ) -> List[Document]:
     """
     Synchronous document retrieval for a sub-query with metadata filtering.
+    DEBUG: Logs what documents are retrieved and their region tags.
     """
     if not vector_store:
         return []
@@ -528,11 +529,21 @@ def _retrieve_documents_sync(
     # Retrieve with similarity search
     relevant_docs = vector_store.similarity_search(sub_query["query"], k=8)
 
+    # DEBUG: Log what was retrieved
+    print(f"\n[DEBUG] Query for {sub_query['entity']}: '{sub_query['query']}'")
+    print(f"[DEBUG] Allowed regions: {sub_query['regions']}")
+    print(f"[DEBUG] Retrieved {len(relevant_docs)} docs from similarity search:")
+    for i, doc in enumerate(relevant_docs, 1):
+        regions = doc.metadata.get("regions", ["UNKNOWN"])
+        print(f"  {i}. Regions={regions}, Content preview: {doc.page_content[:80]}...")
+
     # Filter by allowed regions to prevent cross-contamination
     filtered_docs = filter_documents_by_regions(
         relevant_docs,
         sub_query["regions"]
     )
+
+    print(f"[DEBUG] After filtering: {len(filtered_docs)} docs remain")
 
     # CRITICAL FIX: If filtering removes all docs, try broader search before giving up
     # This prevents APAC policies from contaminating Germany queries
@@ -540,9 +551,15 @@ def _retrieve_documents_sync(
         return filtered_docs
     else:
         # Fallback: try to get more docs and filter them
+        print(f"[DEBUG] No docs survived filtering, trying broader search (k=20)...")
         try:
             more_docs = vector_store.similarity_search(sub_query["query"], k=20)
+            print(f"[DEBUG] Retrieved {len(more_docs)} docs from broader search:")
+            for i, doc in enumerate(more_docs, 1):
+                regions = doc.metadata.get("regions", ["UNKNOWN"])
+                print(f"  {i}. Regions={regions}")
             filtered_more = filter_documents_by_regions(more_docs, sub_query["regions"])
+            print(f"[DEBUG] After filtering broader search: {len(filtered_more)} docs remain")
             return filtered_more
         except Exception as e:
             print(f"Retrieval error: {e}")
