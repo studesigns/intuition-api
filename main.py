@@ -1222,6 +1222,12 @@ async def query_policies(request: dict):
             compliance_status = "REQUIRES REVIEW"
 
         return {
+            # ===== Core Compliance Decision (for frontend parser) =====
+            "risk_level": risk_level,  # CRITICAL, HIGH, MODERATE, LOW
+            "action": action,  # BLOCK, FLAG, APPROVE
+            "violation_summary": violation_summary,
+
+            # ===== Detailed Response Fields =====
             "answer": answer,
             "user_friendly_output": user_friendly_output.strip(),
             "sources": sources,
@@ -1230,8 +1236,8 @@ async def query_policies(request: dict):
             "query_decomposition": sub_queries,
             "regions_analyzed": list(regions_analyzed),
             "decomposition_note": f"Query decomposed into {len(sub_queries)} sub-queries with isolated metadata routing",
-            # ===== New: Structured JSON fields for frontend =====
-            "violation_summary": violation_summary,
+
+            # ===== Structured JSON for multi-location analysis =====
             "risk_classification": json_classification
         }
 
