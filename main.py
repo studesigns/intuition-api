@@ -752,7 +752,7 @@ Return ONLY valid JSON (NO other text):
             context_lower = context.lower()
             result_lower = result.lower()
 
-            prohibition_keywords = ["strictly prohibited", "banned", "not permitted", "zero tolerance"]
+            prohibition_keywords = ["strictly prohibited", "prohibited", "banned", "not permitted", "zero tolerance", "restriction", "not allowed"]
             has_prohibition = any(keyword in context_lower for keyword in prohibition_keywords)
 
             # DEBUG
