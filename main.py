@@ -196,8 +196,6 @@ def decompose_query(question: str, llm: ChatOpenAI = None) -> List[Dict[str, any
         detected_regions = region_detection.get("regions", ["GLOBAL"])
         detected_entities = region_detection.get("entities", [])
 
-        print(f"DEBUG decompose_query: detected_entities={detected_entities}, detected_regions={detected_regions}")
-
         # CRITICAL: Only return the regions actually mentioned in the question
         # This prevents hallucination where Germany also retrieves APAC docs
         if not detected_regions:
@@ -215,7 +213,6 @@ def decompose_query(question: str, llm: ChatOpenAI = None) -> List[Dict[str, any
                 if not entity_regions:
                     entity_regions = ["GLOBAL"]
 
-                print(f"DEBUG: Creating sub-query for entity={entity}, regions={entity_regions}")
                 sub_queries.append({
                     "entity": entity,
                     "query": question,  # Keep full question for context
@@ -224,14 +221,12 @@ def decompose_query(question: str, llm: ChatOpenAI = None) -> List[Dict[str, any
 
         # If no entities detected or creation failed, use single query with all detected regions
         if not sub_queries:
-            print(f"DEBUG: No entities detected, using single query with regions={detected_regions}")
             sub_queries = [{
                 "entity": "General",
                 "query": question,
                 "regions": detected_regions
             }]
 
-        print(f"DEBUG: Final sub_queries count={len(sub_queries)}")
         return sub_queries
 
     except Exception as e:
@@ -551,6 +546,36 @@ async def parallel_retrieve(
     return results
 
 
+def _calculate_overall_risk(analyses: Dict[str, Dict]) -> str:
+    """
+    Calculate overall risk level from individual location analyses.
+    Returns the highest risk found across all locations.
+    """
+    risk_hierarchy = {
+        "CRITICAL": 4,
+        "HIGH": 3,
+        "MODERATE": 2,
+        "LOW": 1,
+        "UNKNOWN": 0
+    }
+
+    max_risk = "UNKNOWN"
+    max_value = 0
+
+    for entity, analysis in analyses.items():
+        if isinstance(analysis, dict):
+            risk_level = analysis.get("risk_level", "UNKNOWN")
+        else:
+            risk_level = "UNKNOWN"
+
+        value = risk_hierarchy.get(risk_level, 0)
+        if value > max_value:
+            max_value = value
+            max_risk = risk_level
+
+    return max_risk
+
+
 def synthesize_comparative_answer(
     question: str,
     sub_queries: List[Dict[str, any]],
@@ -558,97 +583,87 @@ def synthesize_comparative_answer(
     llm: ChatOpenAI
 ) -> str:
     """
-    Extract compliance facts from retrieved documents for the user's location.
-    EXTRACTION MODE ONLY - no synthesis, reasoning, or inference.
+    Extract compliance facts for EACH LOCATION SEPARATELY.
+    Creates individual analyses per location, then combines them.
     """
 
-    # Extract user locations from sub_queries
-    user_locations = set()
+    # Extract all location-specific analyses
+    all_analyses = {}
+
+    # Process each location independently
     for sub_query in sub_queries:
-        if "entity" in sub_query:
-            user_locations.add(sub_query["entity"])
+        entity = sub_query.get("entity", "General")
+        docs = retrieval_results.get(entity, [])
 
-    # Build context for each region separately
-    region_contexts = {}
-    for entity, docs in retrieval_results.items():
-        if docs:
-            context = "\n\n".join([doc.page_content for doc in docs])
-            region_contexts[entity] = context
+        if not docs:
+            all_analyses[entity] = {
+                "risk_level": "UNKNOWN",
+                "action": "UNKNOWN",
+                "reason": "No relevant policies found for this location"
+            }
+            continue
 
-    if not region_contexts:
-        return "No relevant policies found in the knowledge base."
+        # Build context for THIS location only
+        context = "\n\n".join([doc.page_content for doc in docs])
 
-    # Create an extraction prompt (not synthesis)
-    # IMPORTANT: Include user location explicitly to prevent hallucination
-    user_location_str = " and ".join(sorted(user_locations)) if user_locations else "unknown"
+        # Create location-specific prompt
+        location_prompt = f"""{RISK_OFFICER_PROMPT}
 
-    extraction_prompt = f"""{RISK_OFFICER_PROMPT}
-
-USER LOCATION: {user_location_str}
+USER LOCATION: {entity.upper()}
 ORIGINAL QUESTION: {question}
 
-CRITICAL REMINDER:
-You are analyzing policies for [{user_location_str}] ONLY.
-Do NOT apply policies from other regions.
-Do NOT say "including {user_location_str}" unless {user_location_str} is EXPLICITLY listed in the document scope.
+CRITICAL: You are analyzing policies for [{entity.upper()}] ONLY.
+- Use ONLY the retrieved documents below
+- Do NOT apply policies from other regions or locations
+- Do NOT use general knowledge about geography
+- Do NOT infer what location belongs to what region
 
-RETRIEVED POLICY DOCUMENTS:
-"""
+RETRIEVED POLICY DOCUMENTS FOR {entity.upper()}:
+{context}
 
-    for entity, context in region_contexts.items():
-        extraction_prompt += f"\n[DOCUMENT - {entity.upper()}]:\n{context}\n"
+TASK:
+1. Analyze the question: {question}
+2. Apply ONLY the policies above that explicitly apply to {entity.upper()}
+3. Determine the risk level and recommended action
+4. Provide your analysis in JSON format
 
-    extraction_prompt += f"""
-EXTRACTION TASK:
-You are in EXTRACTION MODE. Do NOT synthesize or provide recommendations.
+CRITICAL RULES:
+- If a policy says "APAC region" but {entity.upper()} is not listed, that policy does NOT apply
+- If a policy says "GLOBAL" or "applies to all regions", it applies to {entity.upper()}
+- Only return risk assessment based on retrieved documents
+- Do NOT add information not in the documents
 
-IMPORTANT: This query involves multiple locations: {user_location_str}
-For EACH location, provide a SEPARATE assessment in the detailed_analysis.
+Return ONLY valid JSON object."""
 
-Your task:
-1. For EACH location in [{user_location_str}]:
-   a. Find the explicit scope statement in each document
-   b. Check if [LOCATION] is EXPLICITLY mentioned in that scope
-      - Explicit = directly named or listed in parentheses
-      - NOT explicit = regional classification like "APAC" without listing [LOCATION]
-   c. If YES: Extract what policies apply to [LOCATION]
-   d. If NO: State that document does not apply to [LOCATION]
+        try:
+            response = llm.invoke(location_prompt)
+            result = response.content if hasattr(response, 'content') else str(response)
+            if not isinstance(result, str):
+                result = str(result)
 
-2. Build separate policy assessment for each location in detailed_analysis
+            # Parse the response
+            location_analysis = extract_json_from_response(result)
+            all_analyses[entity] = location_analysis
 
-CRITICAL CONSTRAINTS:
-- Provide analysis for ALL locations mentioned: {user_location_str}
-- Do NOT say "including [LOCATION]" unless it's in the document
-- Do NOT infer that [LOCATION] is in a region unless explicit
-- Do NOT use contextual knowledge about geography
-- For each location: clearly state whether policies APPLY or DO NOT APPLY
-- If document says "APAC region" but doesn't list a location, then that document does NOT apply to that location
+        except Exception as e:
+            print(f"Error analyzing {entity}: {e}")
+            all_analyses[entity] = {
+                "risk_level": "UNKNOWN",
+                "action": "UNKNOWN",
+                "reason": f"Error during analysis: {str(e)}"
+            }
 
-Do NOT combine information from multiple documents.
-Do NOT infer document scope beyond what is explicitly stated.
-Do NOT add contextual knowledge.
+    # Combine all analyses into final response
+    combined_analysis = {}
+    for entity, analysis in all_analyses.items():
+        combined_analysis[entity] = analysis
 
-OUTPUT FORMAT FOR MULTIPLE LOCATIONS:
-If analyzing multiple locations, structure detailed_analysis as:
-
-[LOCATION 1]:
-- Policy 1 applies/does not apply because...
-- Policy 2 applies/does not apply because...
-- Overall risk: [reason]
-
-[LOCATION 2]:
-- Policy 1 applies/does not apply because...
-- Policy 2 applies/does not apply because...
-- Overall risk: [reason]
-
-Return ONLY the JSON object with extracted facts."""
-
-    response = llm.invoke(extraction_prompt)
-    # DEFENSIVE: Ensure response is a string
-    result = response.content if hasattr(response, 'content') else str(response)
-    if not isinstance(result, str):
-        result = str(result) if result else ""
-    return result
+    # Return as JSON string
+    import json
+    return json.dumps({
+        "analyses_by_location": combined_analysis,
+        "overall_risk": _calculate_overall_risk(all_analyses)
+    })
 
 
 @app.get("/")
@@ -883,65 +898,89 @@ async def query_policies(request: dict):
         sources = [doc.page_content[:200] + "..." for doc in all_docs[:5]]  # Top 5
 
         # ===== Extract JSON Classification from Response =====
-        # The LLM includes a JSON block with violation_summary and other fields
+        # synthesize_comparative_answer returns JSON with structure: {analyses_by_location: {...}, overall_risk: "..."}
         try:
             json_classification = extract_json_from_response(answer)
         except Exception as extract_error:
             # Fallback if extraction fails
             print(f"JSON extraction error: {extract_error}")
             json_classification = {
-                "risk_level": "MODERATE",
-                "action": "FLAG",
-                "violation_summary": "Analysis interpretation required",
-                "detailed_analysis": answer
+                "analyses_by_location": {
+                    "General": {
+                        "risk_level": "MODERATE",
+                        "action": "FLAG",
+                        "summary": "Analysis interpretation required"
+                    }
+                },
+                "overall_risk": "MODERATE"
             }
 
-        violation_summary = json_classification.get(
-            "violation_summary",
-            "Compliance assessment pending..."
-        )
+        # Extract overall risk and location-specific analyses
+        analyses_by_location = json_classification.get("analyses_by_location", {})
+        overall_risk = json_classification.get("overall_risk", "MODERATE")
 
-        # Format user-friendly output
-        risk_level = json_classification.get("risk_level", "UNKNOWN").upper()
-        action = json_classification.get("action", "UNKNOWN").upper()
-        detailed = json_classification.get("detailed_analysis", "")
+        # Build detailed analysis text for each location
+        analysis_text = ""
+        for location, analysis_info in analyses_by_location.items():
+            analysis_text += f"\n**{location.upper()}:**\n"
+            if isinstance(analysis_info, dict):
+                risk = analysis_info.get("risk_level", "UNKNOWN")
+                action = analysis_info.get("action", "UNKNOWN")
+                summary = analysis_info.get("summary", "")
+                reason = analysis_info.get("reason", "")
 
-        # Convert detailed analysis to readable format if it's a dict
-        if isinstance(detailed, dict):
-            analysis_text = ""
-            for location, analysis_info in detailed.items():
-                analysis_text += f"\n**{location.upper()}:**\n"
-                if isinstance(analysis_info, dict):
-                    for key, value in analysis_info.items():
-                        analysis_text += f"  - {key}: {value}\n"
-                else:
-                    analysis_text += f"  {analysis_info}\n"
-        else:
-            analysis_text = str(detailed)
+                analysis_text += f"  - Risk Level: {risk}\n"
+                analysis_text += f"  - Recommended Action: {action}\n"
+                if summary:
+                    analysis_text += f"  - Summary: {summary}\n"
+                if reason:
+                    analysis_text += f"  - Details: {reason}\n"
+            else:
+                analysis_text += f"  {analysis_info}\n"
+
+        # Use overall risk for main classification
+        risk_level = overall_risk.upper()
+
+        # Determine recommended action based on overall risk
+        action = "APPROVE"
+        if risk_level == "CRITICAL":
+            action = "BLOCK"
+        elif risk_level in ["HIGH", "MODERATE"]:
+            action = "FLAG"
+        elif risk_level == "LOW":
+            action = "APPROVE"
+
+        # Create summary from first location analysis if available
+        violation_summary = "Compliance assessment complete"
+        first_location_analysis = next(iter(analyses_by_location.values()), {})
+        if isinstance(first_location_analysis, dict):
+            violation_summary = first_location_analysis.get("summary", "Compliance assessment complete")
 
         user_friendly_output = f"""
 ### COMPLIANCE RISK ASSESSMENT
 
 **Question:** {question}
 
-**Risk Level:** {risk_level}
+**Overall Risk Level:** {risk_level}
 **Recommended Action:** {action}
 **Summary:** {violation_summary}
 
-**Detailed Analysis:**
+**Analysis by Location:**
 {analysis_text}
 
 **Documents Reviewed:** {len(all_docs)} policy documents
 **Regions Analyzed:** {', '.join(list(regions_analyzed)) if regions_analyzed else 'GLOBAL'}
 """
 
-        # Determine compliance status from answer
+        # Determine compliance status from overall risk level
         compliance_status = "COMPLIANT"
-        if "BLOCK" in action:
+        if risk_level == "CRITICAL":
             compliance_status = "PROHIBITED"
-        elif "RISK" in answer.upper():
-            compliance_status = "RISK DETECTED"
-        elif "FLAG" in action:
+        elif risk_level in ["HIGH", "MODERATE"]:
+            compliance_status = "REQUIRES REVIEW"
+        elif risk_level == "LOW":
+            compliance_status = "COMPLIANT"
+        else:
             compliance_status = "REQUIRES REVIEW"
 
         return {
