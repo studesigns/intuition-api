@@ -290,47 +290,56 @@ def extract_metadata_from_content(content: str, chunk: str) -> Dict[str, any]:
 
 def extract_json_from_response(response_text: str) -> Dict[str, any]:
     """
-    Extract JSON object from LLM response.
+    CRASH-PROOF JSON extraction from LLM response.
 
-    Since STRICT OUTPUT FORMAT requires raw JSON only, this function:
-    1. First tries to parse response_text directly as JSON (raw JSON response)
-    2. Falls back to markdown json extraction if needed
-    3. Returns validated JSON with required fields
-    4. Applies hallucination detection to detailed_analysis
+    Multi-layer fallback strategy:
+    1. Clean markdown wrappers and try direct JSON.parse()
+    2. Regex extract first { to last } and parse
+    3. Fallback to safe defaults
 
-    Returns:
-        {
-            "risk_level": "CRITICAL" | "HIGH" | "MODERATE" | "LOW",
-            "action": "BLOCK" | "ESCALATE" | "FLAG" | "APPROVE",
-            "violation_summary": "...",
-            "detailed_analysis": "..." (cleaned of hallucinations)
-        }
+    Always returns a valid dict, never crashes.
     """
     import json
 
-    # Try 1: Parse response as raw JSON directly
+    # LAYER 1: Clean markdown and try direct parse
     try:
-        parsed_json = json.loads(response_text.strip())
-        # Clean hallucinations from detailed_analysis
+        clean_text = response_text.replace('```json', '').replace('```', '').strip()
+        parsed_json = json.loads(clean_text)
         parsed_json = _remove_hallucinations_from_json(parsed_json)
         return parsed_json
     except json.JSONDecodeError:
         pass
 
-    # Try 2: Extract JSON from markdown code blocks (fallback for older format)
+    # LAYER 2: Regex extract JSON object (first { to last })
     try:
-        json_match = re.search(r'```json\s*\n?\s*({.*?})\s*\n?```', response_text, re.DOTALL)
+        json_match = re.search(r'\{[\s\S]*\}', response_text)
         if json_match:
-            json_str = json_match.group(1)
+            json_str = json_match.group(0)
             parsed_json = json.loads(json_str)
-            # Clean hallucinations from detailed_analysis
             parsed_json = _remove_hallucinations_from_json(parsed_json)
             return parsed_json
     except (json.JSONDecodeError, AttributeError):
         pass
 
-    # Fallback: return empty dict with defaults so frontend can show error gracefully
-    return {}
+    # LAYER 3: Markdown code block extraction
+    try:
+        json_match = re.search(r'```json\s*\n?\s*({.*?})\s*\n?```', response_text, re.DOTALL)
+        if json_match:
+            json_str = json_match.group(1)
+            parsed_json = json.loads(json_str)
+            parsed_json = _remove_hallucinations_from_json(parsed_json)
+            return parsed_json
+    except (json.JSONDecodeError, AttributeError):
+        pass
+
+    # LAYER 4: FAILSAFE - Return valid response with raw text
+    # This prevents the server from crashing
+    return {
+        "risk_level": "MODERATE",
+        "action": "FLAG",
+        "violation_summary": "Analysis Format Error",
+        "detailed_analysis": f"System analyzed documents but formatting was incorrect. Raw response: {response_text[:500]}"
+    }
 
 
 def _remove_hallucinations_from_json(json_obj: Dict[str, any]) -> Dict[str, any]:
@@ -800,7 +809,28 @@ async def query_policies(request: dict):
         }
 
     except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Error processing query: {str(e)}")
+        # CRASH-PROOF: Return a safe response instead of 500 error
+        import traceback
+        error_trace = traceback.format_exc()
+        print(f"ERROR in /query: {error_trace}")
+
+        # Return valid compliance response even on error
+        return {
+            "answer": f"System encountered an error processing your query: {str(e)}",
+            "sources": [],
+            "compliance_status": "REQUIRES REVIEW",
+            "documents_searched": 0,
+            "query_decomposition": [],
+            "regions_analyzed": [],
+            "decomposition_note": "Error during analysis",
+            "violation_summary": "System Error",
+            "risk_classification": {
+                "risk_level": "MODERATE",
+                "action": "FLAG",
+                "violation_summary": "Processing Error",
+                "detailed_analysis": f"The compliance system encountered an error: {str(e)}"
+            }
+        }
 
 
 @app.get("/status")
