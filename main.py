@@ -656,21 +656,27 @@ LOCATION-SPECIFIC QUESTION: {location_question}
 
 ===== CRITICAL SCOPE RULES FOR {entity.upper()} =====
 
-**REGIONAL RESTRICTIONS (Must check if they apply):**
-- If any document says "Region: APAC" or "Applies to: APAC" → This restriction ONLY applies to APAC region countries
-- APAC region includes: China, Japan, Vietnam, Indonesia, and other Asia-Pacific countries
-- Germany is NOT in APAC region, so APAC restrictions do NOT apply to Germany
-- APAC restrictions ONLY apply to: Japan, China, Vietnam, Indonesia, etc.
+**GERMANY SPECIFIC RULE:**
+If analyzing Germany: Germany is in EUROPE, NOT APAC. The APAC region includes China, Japan, Vietnam, Indonesia.
+- ANY document that says "Region: APAC" or "APAC Addendum" does NOT apply to Germany
+- IGNORE any language about "APAC restrictions" when analyzing Germany
+- IGNORE the "Regional Addendum: Asia-Pacific (APAC)" completely for Germany analysis
+
+**JAPAN/APAC SPECIFIC RULE:**
+If analyzing Japan or other APAC countries: Apply APAC-specific restrictions as they explicitly apply.
 
 **YOUR LOCATION: {entity.upper()}**
-- Determine if {entity.upper()} is in the APAC region
-- If {entity.upper()} is NOT in APAC: IGNORE all APAC-specific restrictions
-- If {entity.upper()} IS in APAC: Apply APAC-specific restrictions in addition to global policies
+- Is {entity.upper()} in APAC region?
+  - YES if: Japan, China, Vietnam, Indonesia, other APAC countries → Apply APAC addendum
+  - NO if: Germany, Europe, US, others → DO NOT apply APAC addendum
 
 **KEY PRINCIPLE:**
-- Regional addendums ONLY apply to their specified region
-- Global policies apply EVERYWHERE unless overridden by a regional restriction that applies to this location
-- A restriction marked "APAC only" CANNOT apply to Germany
+When documents from MULTIPLE regions are provided, use document scope to filter:
+- Documents marked "APAC" → ONLY for APAC locations
+- Documents marked "GLOBAL" → For ALL locations
+- For {entity.upper()}: Only follow policies that explicitly apply to this location
+
+REMEMBER: The fact that you received certain documents does NOT mean they all apply. You must read each document's stated scope and determine if it applies to {entity.upper()}.
 
 ===== RETRIEVED POLICY DOCUMENTS FOR {entity.upper()} =====
 {context}
@@ -681,13 +687,21 @@ LOCATION-SPECIFIC QUESTION: {location_question}
 3. For {entity.upper()}: Is it in the APAC region? Answer: {"YES - apply APAC restrictions" if "apac" in entity.lower() or "japan" in entity.lower() or "tokyo" in entity.lower() else "NO - do NOT apply APAC restrictions, only apply global policies"}
 4. Based on applicable policies (filtered by scope), determine the risk level and action
 
+===== DEFAULT STATE FOR {entity.upper()} =====
+If no active policy that applies to {entity.upper()} explicitly forbids an action, the action is PERMITTED.
+
+For Germany specifically:
+- Unless the GLOBAL policy explicitly forbids karaoke → karaoke is allowed
+- The APAC-only documents do NOT apply to Germany
+- Therefore: Karaoke entertainment = PERMITTED (LOW risk)
+
 ===== RESPONSE FORMAT =====
 Return ONLY valid JSON (NO other text):
 {{
   "risk_level": "CRITICAL|HIGH|MODERATE|LOW|UNKNOWN",
   "action": "BLOCK|FLAG|APPROVE|UNKNOWN",
   "summary": "Brief summary for {entity.upper()}",
-  "reason": "Explain which policies apply and why. E.g., 'APAC restrictions do not apply to Germany, only global policy applies' or 'APAC prohibition applies because {entity.upper()} is in APAC region'"
+  "reason": "Must state which policy applies and its scope. Examples: 'Karaoke is allowed in Germany - APAC prohibition only applies to APAC region' or 'Karaoke prohibited in Japan due to APAC Regional Addendum Section 3.1.1'"
 }}"""
 
         try:
