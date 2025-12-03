@@ -475,11 +475,18 @@ def _retrieve_documents_sync(
     # Retrieve with similarity search
     relevant_docs = vector_store.similarity_search(sub_query["query"], k=8)
 
+    print(f"DEBUG: Retrieved {len(relevant_docs)} docs for query, allowed regions: {sub_query['regions']}")
+    for i, doc in enumerate(relevant_docs[:3]):
+        doc_regions = doc.metadata.get("regions", ["GLOBAL"])
+        print(f"  Doc {i}: regions={doc_regions}, content={doc.page_content[:50]}...")
+
     # Filter by allowed regions to prevent cross-contamination
     filtered_docs = filter_documents_by_regions(
         relevant_docs,
         sub_query["regions"]
     )
+
+    print(f"DEBUG: After filtering: {len(filtered_docs)} docs remain")
 
     # CRITICAL FIX: If filtering removes all docs, try broader search before giving up
     # This prevents APAC policies from contaminating Germany queries
@@ -490,6 +497,7 @@ def _retrieve_documents_sync(
         try:
             more_docs = vector_store.similarity_search(sub_query["query"], k=20)
             filtered_more = filter_documents_by_regions(more_docs, sub_query["regions"])
+            print(f"DEBUG: Fallback retrieved {len(filtered_more)} docs after filtering")
             return filtered_more
         except Exception as e:
             print(f"Retrieval error: {e}")
