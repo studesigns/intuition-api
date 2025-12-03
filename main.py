@@ -1228,8 +1228,7 @@ async def query_policies(request: dict):
             "violation_summary": violation_summary,
 
             # ===== Detailed Response Fields =====
-            "answer": answer,
-            "user_friendly_output": user_friendly_output.strip(),
+            "answer": user_friendly_output.strip(),  # Clean formatted output (not raw JSON)
             "sources": sources,
             "compliance_status": compliance_status,
             "documents_searched": len(all_docs),
