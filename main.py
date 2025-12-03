@@ -715,20 +715,25 @@ For Germany specifically:
 - Therefore: Karaoke entertainment = PERMITTED (LOW risk)
 
 ===== JAPAN/APAC SPECIFIC - WHAT IS & ISN'T PROHIBITED =====
-**EXPLICITLY PROHIBITED in APAC/Japan** (from Section 3.1.1):
-- Karaoke (KTV)
-- Nightclubs
-- Hostess bars
+CRITICAL SCOPE RULE: Tokyo and Japan ARE IN THE APAC REGION.
+The APAC Regional Addendum EXPLICITLY applies to Japan and Tokyo.
+Apply the APAC Addendum rules to Tokyo and Japan queries.
 
-**EXPLICITLY PERMITTED in APAC/Japan** (even though there are restrictions on gifts):
-- Business dinners
-- Client lunches
-- Golf outings
+**EXPLICITLY PROHIBITED in APAC/Japan** (from APAC Addendum Section 3.1.1):
+- Karaoke (KTV) - STRICTLY PROHIBITED in APAC including Japan
+- Nightclubs - STRICTLY PROHIBITED in APAC including Japan
+- Hostess bars - STRICTLY PROHIBITED in APAC including Japan
+
+**EXPLICITLY PERMITTED in APAC/Japan** (but with cost restrictions):
+- Business dinners (limited to $50/person gift max)
+- Client lunches (limited to $50/person gift max)
+- Golf outings (limited to $50/person gift max)
 - Client meetings
 - All other activities NOT on the prohibited list above
 
-CRITICAL: Just because there is a gift limit ($50 max) does NOT mean the activity is prohibited.
-The activity itself (dinner, golf, lunch) is ALLOWED. Only the gift value is limited.
+CRITICAL: Gift limits ($50 max) do NOT prohibit the activity itself.
+Dinner, golf, lunch ARE ALLOWED - only the gift cost is limited.
+BUT: Karaoke and nightclub are ABSOLUTELY PROHIBITED - no exceptions.
 
 ===== RISK & ACTION ASSIGNMENT GUIDE =====
 **CRITICAL + BLOCK**: Activity is strictly prohibited/banned with immediate suspension/termination
