@@ -999,11 +999,25 @@ async def query_policies(request: dict):
         elif risk_level == "LOW":
             action = "APPROVE"
 
-        # Create summary from first location analysis if available
-        violation_summary = "Compliance assessment complete"
-        first_location_analysis = next(iter(analyses_by_location.values()), {})
-        if isinstance(first_location_analysis, dict):
-            violation_summary = first_location_analysis.get("summary", "Compliance assessment complete")
+        # Create summary that reflects the overall assessment
+        # For multi-location queries, show the overall status, not just one location
+        if len(analyses_by_location) > 1:
+            # Multi-location: show overall compliance status
+            if risk_level == "CRITICAL":
+                violation_summary = f"Multiple locations analyzed: One or more locations PROHIBITED"
+            elif risk_level == "HIGH":
+                violation_summary = f"Multiple locations analyzed: One or more locations HIGH RISK"
+            elif risk_level == "MODERATE":
+                violation_summary = f"Multiple locations analyzed: Review required for one or more locations"
+            else:
+                violation_summary = f"Multiple locations analyzed: All locations compliant"
+        else:
+            # Single location: use the location's summary
+            first_location_analysis = next(iter(analyses_by_location.values()), {})
+            if isinstance(first_location_analysis, dict):
+                violation_summary = first_location_analysis.get("summary", "Compliance assessment complete")
+            else:
+                violation_summary = "Compliance assessment complete"
 
         user_friendly_output = f"""
 ### COMPLIANCE RISK ASSESSMENT
