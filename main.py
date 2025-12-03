@@ -196,6 +196,8 @@ def decompose_query(question: str, llm: ChatOpenAI = None) -> List[Dict[str, any
         detected_regions = region_detection.get("regions", ["GLOBAL"])
         detected_entities = region_detection.get("entities", [])
 
+        print(f"DEBUG decompose_query: detected_entities={detected_entities}, detected_regions={detected_regions}")
+
         # CRITICAL: Only return the regions actually mentioned in the question
         # This prevents hallucination where Germany also retrieves APAC docs
         if not detected_regions:
@@ -213,6 +215,7 @@ def decompose_query(question: str, llm: ChatOpenAI = None) -> List[Dict[str, any
                 if not entity_regions:
                     entity_regions = ["GLOBAL"]
 
+                print(f"DEBUG: Creating sub-query for entity={entity}, regions={entity_regions}")
                 sub_queries.append({
                     "entity": entity,
                     "query": question,  # Keep full question for context
@@ -221,12 +224,14 @@ def decompose_query(question: str, llm: ChatOpenAI = None) -> List[Dict[str, any
 
         # If no entities detected or creation failed, use single query with all detected regions
         if not sub_queries:
+            print(f"DEBUG: No entities detected, using single query with regions={detected_regions}")
             sub_queries = [{
                 "entity": "General",
                 "query": question,
                 "regions": detected_regions
             }]
 
+        print(f"DEBUG: Final sub_queries count={len(sub_queries)}")
         return sub_queries
 
     except Exception as e:
