@@ -651,37 +651,43 @@ def synthesize_comparative_answer(
 
 ===== ANALYZING {entity.upper()} ONLY =====
 
-Your task is to analyze ONLY policies for: {entity.upper()}
-
+LOCATION: {entity.upper()}
 LOCATION-SPECIFIC QUESTION: {location_question}
-(Original question for context: {question})
 
-===== CRITICAL ANALYSIS RULES =====
-1. You MUST analyze the question AS IT APPLIES TO {entity.upper()}
-2. You MUST NOT analyze other locations mentioned in the question
-3. You MUST NOT mix analysis of different locations
-4. If the question mentions multiple locations, analyze ONLY what applies to {entity.upper()}
-5. Do NOT speculate about other locations
-6. If a policy explicitly mentions {entity.upper()}, it applies
-7. If a policy says "APAC region" without listing {entity.upper()}, it does NOT apply
-8. If a policy says "GLOBAL" or "applies to all regions", it applies to {entity.upper()}
+===== CRITICAL SCOPE RULES FOR {entity.upper()} =====
+
+**REGIONAL RESTRICTIONS (Must check if they apply):**
+- If any document says "Region: APAC" or "Applies to: APAC" → This restriction ONLY applies to APAC region countries
+- APAC region includes: China, Japan, Vietnam, Indonesia, and other Asia-Pacific countries
+- Germany is NOT in APAC region, so APAC restrictions do NOT apply to Germany
+- APAC restrictions ONLY apply to: Japan, China, Vietnam, Indonesia, etc.
+
+**YOUR LOCATION: {entity.upper()}**
+- Determine if {entity.upper()} is in the APAC region
+- If {entity.upper()} is NOT in APAC: IGNORE all APAC-specific restrictions
+- If {entity.upper()} IS in APAC: Apply APAC-specific restrictions in addition to global policies
+
+**KEY PRINCIPLE:**
+- Regional addendums ONLY apply to their specified region
+- Global policies apply EVERYWHERE unless overridden by a regional restriction that applies to this location
+- A restriction marked "APAC only" CANNOT apply to Germany
 
 ===== RETRIEVED POLICY DOCUMENTS FOR {entity.upper()} =====
 {context}
 
-===== YOUR TASK =====
-Analyze this location-specific question for {entity.upper()} ONLY:
-"{location_question}"
-
-Based ONLY on the retrieved documents above, determine the risk level and recommended action for {entity.upper()}.
+===== YOUR ANALYSIS TASK =====
+1. Read the retrieved documents above
+2. Identify which documents apply to {entity.upper()} based on their stated scope
+3. For {entity.upper()}: Is it in the APAC region? Answer: {"YES - apply APAC restrictions" if "apac" in entity.lower() or "japan" in entity.lower() or "tokyo" in entity.lower() else "NO - do NOT apply APAC restrictions, only apply global policies"}
+4. Based on applicable policies (filtered by scope), determine the risk level and action
 
 ===== RESPONSE FORMAT =====
-Return ONLY valid JSON with this exact structure (NO other text):
+Return ONLY valid JSON (NO other text):
 {{
   "risk_level": "CRITICAL|HIGH|MODERATE|LOW|UNKNOWN",
   "action": "BLOCK|FLAG|APPROVE|UNKNOWN",
-  "summary": "Brief summary for {entity.upper()} only",
-  "reason": "Explanation based on retrieved documents"
+  "summary": "Brief summary for {entity.upper()}",
+  "reason": "Explain which policies apply and why. E.g., 'APAC restrictions do not apply to Germany, only global policy applies' or 'APAC prohibition applies because {entity.upper()} is in APAC region'"
 }}"""
 
         try:
