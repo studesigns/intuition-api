@@ -30,9 +30,56 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+# ===== PERSISTENCE FUNCTIONS =====
+
+def save_vector_store():
+    """Save vector store to disk for persistence"""
+    global vector_store, all_documents
+    if vector_store is None:
+        return
+    try:
+        # Save FAISS index
+        vector_store.save_local(VECTOR_STORE_PATH)
+        print(f"✓ Vector store saved to {VECTOR_STORE_PATH}")
+    except Exception as e:
+        print(f"✗ Error saving vector store: {e}")
+
+def load_vector_store():
+    """Load vector store from disk at startup"""
+    global vector_store
+    from pathlib import Path
+    db_path = Path(VECTOR_STORE_PATH)
+
+    if not db_path.exists():
+        print(f"ℹ Vector store not found at {VECTOR_STORE_PATH}")
+        return False
+
+    try:
+        embeddings = OpenAIEmbeddings(
+            model="text-embedding-ada-002",
+            openai_api_key=os.getenv("OPENAI_API_KEY")
+        )
+        vector_store = FAISS.load_local(
+            VECTOR_STORE_PATH,
+            embeddings,
+            allow_dangerous_deserialization=True
+        )
+        print(f"✓ Vector store loaded from {VECTOR_STORE_PATH}")
+        return True
+    except Exception as e:
+        print(f"✗ Error loading vector store: {e}")
+        return False
+
+# Startup event to load vector store on server start
+@app.on_event("startup")
+async def startup_event():
+    """Load vector store when server starts"""
+    load_vector_store()
+
 # Global variables for advanced RAG
 vector_store = None
 all_documents = []  # Store documents with metadata for filtering
+VECTOR_STORE_PATH = "/home/stu/Projects/intuition-api/vector_store_db"
 
 # Region configuration mapping
 REGION_MAPPING = {
@@ -238,35 +285,26 @@ def extract_metadata_from_content(content: str, chunk: str) -> Dict[str, any]:
     chunk_lower = chunk.lower()
     content_lower = content.lower()
 
-    # CRITICAL: If chunk explicitly mentions a region scope ("Applies To: APAC", "Region: APAC"), respect it
-    # Use STRICT matching to avoid false positives (e.g., "does NOT apply to Europe" shouldn't tag as EMEA)
+    # CRITICAL: EXPLICIT REGION DETECTION ONLY
+    # If a document explicitly states it's regional (APAC, EMEA, US), respect that.
+    # Otherwise, assume GLOBAL by default (safer for policy documents).
 
-    # Check for APAC scope (most important since it has restrictions)
-    if any(phrase in chunk_lower for phrase in ["applies to: apac", "region: apac", "asia-pacific region", "apac region only", "regional addendum to global"]):
+    # === DETECT APAC SCOPE (highest priority - has restrictions) ===
+    if any(phrase in content_lower for phrase in ["asia-pacific region", "regional addendum to global", "apac region only", "apac - prohibited", "prohibited in apac"]):
         regions = ["APAC"]
-    # Check for APAC scope in full document (for chunks without explicit header)
-    elif any(phrase in content_lower for phrase in ["regional addendum to global", "asia-pacific region", "apac region only"]) and "does not apply to apac" not in content_lower:
-        regions = ["APAC"]
-    # Check for EMEA scope (but avoid matching "does not apply to Europe")
-    elif any(phrase in chunk_lower for phrase in ["applies to: emea", "region: emea"]) and "does not apply" not in chunk_lower:
-        regions = ["EMEA"]
-    # Check for US scope
-    elif any(phrase in chunk_lower for phrase in ["applies to: us", "region: us"]) and "does not apply" not in chunk_lower:
+    # === DETECT US SCOPE ===
+    elif any(phrase in content_lower for phrase in ["us region", "united states only", "us scope"]) and "does not apply" not in content_lower:
         regions = ["US"]
-    # Check for GLOBAL scope (but be careful not to match content that mentions global in other contexts)
-    elif any(phrase in chunk_lower for phrase in ["applies to: all", "applies to: global", "worldwide policy", "global code", "global policy"]):
-        regions = ["GLOBAL"]
+    # === DETECT EMEA SCOPE ===
+    elif any(phrase in content_lower for phrase in ["emea region", "emea scope"]) and "does not apply" not in content_lower:
+        regions = ["EMEA"]
     else:
-        # Fallback: Check if document-level scope exists
-        # This prevents chunks that don't have explicit scope from mixing regions
-        if any(phrase in content_lower for phrase in ["regional addendum to global", "asia-pacific region"]):
-            regions = ["APAC"]
-        elif any(phrase in content_lower for phrase in ["applies to: emea", "region: emea"]):
-            regions = ["EMEA"]
-        else:
-            # DEFAULT: Assume GLOBAL if no specific region markers found
-            # This allows global policy documents to be used for all queries
-            regions = ["GLOBAL"]
+        # DEFAULT: ASSUME GLOBAL
+        # This is safer because:
+        # 1. Global policies should apply everywhere
+        # 2. Regional addendums explicitly state their scope
+        # 3. If no scope is mentioned, assume universal applicability
+        regions = ["GLOBAL"]
 
     return {
         "regions": regions,
@@ -429,17 +467,18 @@ def _retrieve_documents_sync(
         sub_query["regions"]
     )
 
-    # CRITICAL FIX: If filtering removes all docs, return ONLY GLOBAL docs, not unfiltered fallback
+    # CRITICAL FIX: If filtering removes all docs, try broader search before giving up
     # This prevents APAC policies from contaminating Germany queries
     if filtered_docs:
         return filtered_docs
     else:
-        # Fallback: try to get more docs and filter them, or return GLOBAL only
+        # Fallback: try to get more docs and filter them
         try:
             more_docs = vector_store.similarity_search(sub_query["query"], k=20)
             filtered_more = filter_documents_by_regions(more_docs, sub_query["regions"])
-            return filtered_more if filtered_more else []
-        except:
+            return filtered_more
+        except Exception as e:
+            print(f"Retrieval error: {e}")
             return []
 
 
@@ -659,8 +698,10 @@ async def upload_policies(files: List[UploadFile] = File(...)):
 
             # Create documents with metadata for each chunk
             # CRITICAL: Pass file_text (single document), NOT combined text of all files
-            for chunk in file_chunks:
+            file_regions = set()
+            for i, chunk in enumerate(file_chunks):
                 metadata = extract_metadata_from_content(file_text, chunk)
+                file_regions.update(metadata["regions"])
                 all_regions.update(metadata["regions"])
 
                 # Create LangChain Document with metadata
@@ -669,6 +710,9 @@ async def upload_policies(files: List[UploadFile] = File(...)):
                     metadata=metadata
                 )
                 documents.append(doc)
+
+            # Log regions for this file
+            print(f"  File: {file.filename} - Regions: {list(file_regions)}, Chunks: {len(file_chunks)}")
 
         if not documents:
             raise HTTPException(
@@ -684,6 +728,9 @@ async def upload_policies(files: List[UploadFile] = File(...)):
 
         vector_store = FAISS.from_documents(documents, embeddings)
         all_documents = documents
+
+        # Save vector store to disk for persistence
+        save_vector_store()
 
         return {
             "status": "success",
