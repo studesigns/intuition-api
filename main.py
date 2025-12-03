@@ -840,26 +840,33 @@ Return ONLY valid JSON (NO other text):
             entity_regions = detect_regions_in_text(entity).get("regions", [])
             is_apac_location = "APAC" in entity_regions
 
+            # DEBUG
+            print(f"  [SANITY CHECK] Entity: {entity}, Regions: {entity_regions}, APAC? {is_apac_location}")
+            print(f"  [SANITY CHECK] Question: {question_lower[:80]}, Prohibited activity? {is_prohibited_activity}")
+            print(f"  [SANITY CHECK] LLM returned: action={location_analysis.get('action')}, risk={location_analysis.get('risk_level')}")
+
             # Rule 1: If activity IS prohibited AND location is APAC, force BLOCK/CRITICAL
             if is_prohibited_activity and is_apac_location:
-                print(f"  ✓ SANITY CHECK: Prohibited activity in APAC location, forcing BLOCK/CRITICAL")
+                print(f"  ✓ SANITY CHECK RULE 1: Prohibited activity in APAC location, forcing BLOCK/CRITICAL")
                 location_analysis["action"] = "BLOCK"
                 location_analysis["risk_level"] = "CRITICAL"
                 location_analysis["reason"] = location_analysis.get("reason", "") + " [ENFORCED: Activity is explicitly prohibited in APAC]"
 
             # Rule 2: If activity is NOT prohibited but LLM said BLOCK, revert to APPROVE
             elif location_analysis.get("action") == "BLOCK" and not is_prohibited_activity:
-                print(f"  ⚠️ SANITY CHECK: Activity not explicitly prohibited, reverting BLOCK→APPROVE")
+                print(f"  ✓ SANITY CHECK RULE 2: Activity not explicitly prohibited, reverting BLOCK→APPROVE")
                 location_analysis["action"] = "APPROVE"
                 location_analysis["risk_level"] = "LOW"
                 location_analysis["reason"] = location_analysis.get("reason", "") + " [NOTE: Not in explicit prohibition list, activity is permitted]"
 
             # Rule 3: Non-APAC location with prohibited activity = APPROVE (no regional restriction)
             elif is_prohibited_activity and not is_apac_location:
-                print(f"  ✓ SANITY CHECK: Activity mentioned but not restricted in {entity.upper()}, keeping APPROVE")
+                print(f"  ✓ SANITY CHECK RULE 3: Prohibited activity in non-APAC location, forcing APPROVE")
                 location_analysis["action"] = "APPROVE"
                 location_analysis["risk_level"] = "LOW"
-                location_analysis["reason"] = location_analysis.get("reason", "") + " [NOTE: Activity restrictions apply to APAC region only, not {entity.upper()}]"
+                location_analysis["reason"] = location_analysis.get("reason", "") + " [NOTE: Activity restrictions apply to APAC region only, not to {0}]".format(entity.upper())
+
+            print(f"  [SANITY CHECK RESULT] action={location_analysis.get('action')}, risk={location_analysis.get('risk_level')}")
 
             # If we found prohibition language, ensure correct action and risk level
             if has_prohibition:
