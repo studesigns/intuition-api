@@ -793,17 +793,22 @@ Return ONLY valid JSON (NO other text):
             print(f"  Context preview: {context_lower[:150]}...")
             print(f"  has_prohibition={has_prohibition}, action={location_analysis.get('action')}, risk_level={location_analysis.get('risk_level')}")
 
-            # SANITY CHECK FIRST: If LLM blocked something that's clearly not one of the prohibited activities
-            # Explicitly prohibited: karaoke, nightclub, hostess bar
-            # All others: APPROVE
+            # SANITY CHECK: Enforce explicit prohibition list
+            # Explicitly prohibited activities: karaoke, nightclub, hostess bar
             question_lower = question.lower()
             prohibited_activities = ["karaoke", "nightclub", "hostess bar", "hostess"]
             is_prohibited_activity = any(activity in question_lower for activity in prohibited_activities)
 
-            if location_analysis.get("action") == "BLOCK" and not is_prohibited_activity:
-                # LLM blocked something that isn't explicitly prohibited
-                # Revert to APPROVE since we know only karaoke/nightclub/hostess are prohibited
-                print(f"  ⚠️ SANITY CHECK: Activity not explicitly prohibited, reverting to APPROVE")
+            # Rule 1: If activity IS prohibited, force BLOCK/CRITICAL (regardless of what LLM said)
+            if is_prohibited_activity:
+                print(f"  ✓ SANITY CHECK: Explicitly prohibited activity detected, forcing BLOCK/CRITICAL")
+                location_analysis["action"] = "BLOCK"
+                location_analysis["risk_level"] = "CRITICAL"
+                location_analysis["reason"] = location_analysis.get("reason", "") + " [ENFORCED: Activity is explicitly prohibited]"
+
+            # Rule 2: If activity is NOT prohibited but LLM said BLOCK, revert to APPROVE
+            elif location_analysis.get("action") == "BLOCK":
+                print(f"  ⚠️ SANITY CHECK: Activity not explicitly prohibited, reverting BLOCK→APPROVE")
                 location_analysis["action"] = "APPROVE"
                 location_analysis["risk_level"] = "LOW"
                 location_analysis["reason"] = location_analysis.get("reason", "") + " [NOTE: Not in explicit prohibition list, activity is permitted]"
