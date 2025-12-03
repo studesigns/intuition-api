@@ -261,6 +261,9 @@ def filter_documents_by_regions(documents: List[Document], allowed_regions: List
 
         if has_matching_region:
             filtered.append(doc)
+        # Debug: Log when APAC docs are filtered out
+        elif "APAC" in doc_regions and "APAC" not in allowed_regions:
+            print(f"DEBUG: Filtering out APAC doc, allowed regions: {allowed_regions}")
 
     return filtered
 
