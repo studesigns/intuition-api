@@ -188,7 +188,7 @@ def detect_regions_in_text(text: str) -> Dict[str, List[str]]:
 def decompose_query(question: str, llm: ChatOpenAI = None) -> List[Dict[str, any]]:
     """
     Decompose a query into multiple sub-queries if it contains multiple entities.
-    SIMPLIFIED: Returns single query to avoid LLM errors.
+    Handles both single-location and multi-location queries.
     """
     try:
         # Detect regions in question
@@ -201,16 +201,34 @@ def decompose_query(question: str, llm: ChatOpenAI = None) -> List[Dict[str, any
         if not detected_regions:
             detected_regions = ["GLOBAL"]
 
-        # Use actual detected location as entity, not generic "Query"
-        # This helps LLM understand which location is being asked about
-        entity_name = detected_entities[0] if detected_entities else "General"
+        # MULTI-LOCATION SUPPORT: Create separate sub-queries for each location
+        # This allows proper comparative analysis between regions
+        sub_queries = []
 
-        # Return a single query covering only the detected regions
-        return [{
-            "entity": entity_name,
-            "query": question,
-            "regions": detected_regions
-        }]
+        if detected_entities and len(detected_entities) > 0:
+            # If multiple locations mentioned, create separate sub-query for each
+            for entity in detected_entities:
+                # Map entity location to its regions
+                entity_regions = detect_regions_in_text(entity).get("regions", ["GLOBAL"])
+                if not entity_regions:
+                    entity_regions = ["GLOBAL"]
+
+                sub_queries.append({
+                    "entity": entity,
+                    "query": question,  # Keep full question for context
+                    "regions": entity_regions
+                })
+
+        # If no entities detected or creation failed, use single query with all detected regions
+        if not sub_queries:
+            sub_queries = [{
+                "entity": "General",
+                "query": question,
+                "regions": detected_regions
+            }]
+
+        return sub_queries
+
     except Exception as e:
         # Fallback to safest possible response - ONLY GLOBAL, not all regions!
         # Returning all regions would contaminate Germany queries with APAC policies
@@ -883,6 +901,19 @@ async def query_policies(request: dict):
         action = json_classification.get("action", "UNKNOWN").upper()
         detailed = json_classification.get("detailed_analysis", "")
 
+        # Convert detailed analysis to readable format if it's a dict
+        if isinstance(detailed, dict):
+            analysis_text = ""
+            for location, analysis_info in detailed.items():
+                analysis_text += f"\n**{location.upper()}:**\n"
+                if isinstance(analysis_info, dict):
+                    for key, value in analysis_info.items():
+                        analysis_text += f"  - {key}: {value}\n"
+                else:
+                    analysis_text += f"  {analysis_info}\n"
+        else:
+            analysis_text = str(detailed)
+
         user_friendly_output = f"""
 ### COMPLIANCE RISK ASSESSMENT
 
@@ -892,8 +923,8 @@ async def query_policies(request: dict):
 **Recommended Action:** {action}
 **Summary:** {violation_summary}
 
-**Analysis:**
-{detailed}
+**Detailed Analysis:**
+{analysis_text}
 
 **Documents Reviewed:** {len(all_docs)} policy documents
 **Regions Analyzed:** {', '.join(list(regions_analyzed)) if regions_analyzed else 'GLOBAL'}
