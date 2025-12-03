@@ -180,11 +180,18 @@ Format your response as a numbered list:
     response = llm.invoke(decomposition_prompt)
     decomposed_text = response.content
 
+    # DEFENSIVE: Ensure decomposed_text is a string
+    if not isinstance(decomposed_text, str):
+        decomposed_text = str(decomposed_text) if decomposed_text else ""
+
     # Parse the decomposition response
     sub_queries = []
     lines = decomposed_text.split('\n')
 
     for line in lines:
+        # DEFENSIVE: Ensure line is a string
+        if not isinstance(line, str):
+            line = str(line)
         if line.strip() and re.match(r'^\d+\.\s', line):
             # Extract the sub-query
             match = re.search(r'^\d+\.\s+\[?([^\]]+)\]?:\s*(.+)$', line)
@@ -310,6 +317,10 @@ def extract_json_from_response(response_text: str) -> Dict[str, any]:
     Always returns a valid dict, never crashes.
     """
     import json
+
+    # DEFENSIVE: Ensure response_text is a string
+    if not isinstance(response_text, str):
+        response_text = str(response_text) if response_text else "{}"
 
     # LAYER 1: Clean markdown and try direct parse
     try:
@@ -578,7 +589,11 @@ If analyzing multiple locations, structure detailed_analysis as:
 Return ONLY the JSON object with extracted facts."""
 
     response = llm.invoke(extraction_prompt)
-    return response.content
+    # DEFENSIVE: Ensure response is a string
+    result = response.content if hasattr(response, 'content') else str(response)
+    if not isinstance(result, str):
+        result = str(result) if result else ""
+    return result
 
 
 @app.get("/")
