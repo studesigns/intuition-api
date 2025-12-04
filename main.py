@@ -6,6 +6,8 @@ import tempfile
 import re
 import asyncio
 from concurrent.futures import ThreadPoolExecutor
+import uuid
+from datetime import datetime
 
 from langchain.text_splitter import RecursiveCharacterTextSplitter
 from langchain_community.vectorstores import FAISS
@@ -89,7 +91,7 @@ def save_vector_store():
 
 def load_vector_store():
     """Load vector store from disk at startup"""
-    global vector_store
+    global vector_store, all_documents
     from pathlib import Path
     db_path = Path(VECTOR_STORE_PATH)
 
@@ -107,7 +109,9 @@ def load_vector_store():
             embeddings,
             allow_dangerous_deserialization=True
         )
-        print(f"✓ Vector store loaded from {VECTOR_STORE_PATH}")
+        # Rebuild all_documents from vector store docstore
+        all_documents = [doc for doc_id, doc in vector_store.docstore._dict.items()]
+        print(f"✓ Vector store loaded from {VECTOR_STORE_PATH} ({len(all_documents)} documents)")
         return True
     except Exception as e:
         print(f"✗ Error loading vector store: {e}")
@@ -976,10 +980,17 @@ async def upload_policies(files: List[UploadFile] = File(...)):
             # Create documents with metadata for each chunk
             # CRITICAL: Pass file_text (single document), NOT combined text of all files
             file_regions = set()
+            file_id = str(uuid.uuid4())  # Same file_id for all chunks from this PDF
             for i, chunk in enumerate(file_chunks):
                 metadata = extract_metadata_from_content(file_text, chunk)
                 file_regions.update(metadata["regions"])
                 all_regions.update(metadata["regions"])
+
+                # Add file-level tracking metadata
+                metadata["filename"] = file.filename
+                metadata["file_id"] = file_id
+                metadata["upload_timestamp"] = datetime.now().isoformat()
+                metadata["chunk_index"] = i
 
                 # Create LangChain Document with metadata
                 doc = Document(
@@ -1019,6 +1030,127 @@ async def upload_policies(files: List[UploadFile] = File(...)):
 
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Error processing files: {str(e)}")
+
+
+@app.delete("/documents/{filename}")
+async def delete_document(filename: str):
+    """
+    Delete a document by filename.
+    Removes all chunks with matching filename from vector store.
+
+    Args:
+        filename: The exact filename to delete (e.g., "Policy_APAC.pdf")
+
+    Returns:
+        {
+            "status": "success",
+            "filename": "...",
+            "chunks_deleted": 5,
+            "message": "..."
+        }
+    """
+    global vector_store, all_documents
+
+    if not vector_store:
+        raise HTTPException(
+            status_code=400,
+            detail="No vector store loaded. Upload documents first."
+        )
+
+    try:
+        # Find all chunk IDs that match this filename
+        chunk_ids_to_delete = []
+        for doc_id, doc in vector_store.docstore._dict.items():
+            if doc.metadata.get("filename") == filename:
+                chunk_ids_to_delete.append(doc_id)
+
+        if not chunk_ids_to_delete:
+            raise HTTPException(
+                status_code=404,
+                detail=f"No chunks found for filename: {filename}"
+            )
+
+        # Delete from vector store
+        vector_store.delete(chunk_ids_to_delete)
+
+        # Update all_documents list
+        all_documents = [
+            doc for doc in all_documents
+            if doc.metadata.get("filename") != filename
+        ]
+
+        # Persist changes to disk
+        save_vector_store()
+
+        print(f"✓ Deleted {len(chunk_ids_to_delete)} chunks for file: {filename}")
+
+        return {
+            "status": "success",
+            "filename": filename,
+            "chunks_deleted": len(chunk_ids_to_delete),
+            "message": f"Successfully deleted {len(chunk_ids_to_delete)} chunks from document '{filename}'"
+        }
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        print(f"Error deleting document: {e}")
+        raise HTTPException(
+            status_code=500,
+            detail=f"Error deleting document: {str(e)}"
+        )
+
+
+@app.get("/documents")
+async def list_documents():
+    """
+    List all uploaded documents with metadata.
+
+    Returns:
+        {
+            "files": [
+                {
+                    "filename": "Policy_APAC.pdf",
+                    "chunks": 5,
+                    "regions": ["APAC", "GLOBAL"],
+                    "upload_timestamp": "2025-12-04T14:30:00"
+                }
+            ]
+        }
+    """
+    if not vector_store:
+        return {"files": []}
+
+    try:
+        files_map = {}
+
+        for doc_id, doc in vector_store.docstore._dict.items():
+            filename = doc.metadata.get("filename", "unknown")
+
+            if filename not in files_map:
+                files_map[filename] = {
+                    "filename": filename,
+                    "chunks": 0,
+                    "regions": set(),
+                    "upload_timestamp": doc.metadata.get("upload_timestamp", "")
+                }
+
+            files_map[filename]["chunks"] += 1
+            files_map[filename]["regions"].update(doc.metadata.get("regions", ["GLOBAL"]))
+
+        # Convert sets to lists for JSON serialization
+        files_list = []
+        for f in files_map.values():
+            files_list.append({
+                **f,
+                "regions": list(f["regions"])
+            })
+
+        return {"files": files_list}
+
+    except Exception as e:
+        print(f"Error listing documents: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
 
 
 @app.post("/query")
