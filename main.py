@@ -1032,7 +1032,7 @@ async def upload_policies(files: List[UploadFile] = File(...)):
         raise HTTPException(status_code=500, detail=f"Error processing files: {str(e)}")
 
 
-@app.delete("/documents/{filename}")
+@app.delete("/documents/{filename}", status_code=200)
 async def delete_document(filename: str):
     """
     Delete a document by filename.
