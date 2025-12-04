@@ -1206,7 +1206,7 @@ async def query_policies(request: dict):
 **Analysis by Location:**
 {analysis_text}
 
-**Documents Reviewed:** {len(all_docs)} policy documents
+**Policy Chunks Analyzed:** {len(all_docs)} (retrieved from uploaded PDFs)
 **Regions Analyzed:** {', '.join(list(regions_analyzed)) if regions_analyzed else 'GLOBAL'}
 """
 
@@ -1231,7 +1231,8 @@ async def query_policies(request: dict):
             "answer": user_friendly_output.strip(),  # Clean formatted output (not raw JSON)
             "sources": sources,
             "compliance_status": compliance_status,
-            "documents_searched": len(all_docs),
+            "chunks_analyzed": len(all_docs),  # Policy chunks retrieved for this query
+            "documents_searched": len(all_docs),  # Backward compatibility: total chunks analyzed
             "query_decomposition": sub_queries,
             "regions_analyzed": list(regions_analyzed),
             "decomposition_note": f"Query decomposed into {len(sub_queries)} sub-queries with isolated metadata routing",
